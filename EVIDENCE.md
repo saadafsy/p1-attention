@@ -14,3 +14,5 @@ VERIFY OK: attn_model
 VERIFY OK: attn_model
 | verify-mac_unit | mac_unit passes lint/sim/cov/synth/formal | PASS | make verify MODULE=mac_unit | 0 |
 VERIFY OK: mac_unit
+| audit-mac_unit-lint-synth | lint-synth-auditor independent re-run: verilator+verible lint clean, yosys check 0 problems, no $_DLATCH_, netlist latch-free | PASS | agent re-ran make lint + make synth-check + yosys synth, 2026-07-16 | 0 |
+| audit-mac_unit-formal-coverage | formal-coverage-auditor independent re-run: cocotb 4/4 on two seeds, line coverage 100%, sby BMC PASS; gaps noted in report | PASS | agent re-ran make sim (SEED=1,7) + check_coverage + sby, 2026-07-16 | 0 |
