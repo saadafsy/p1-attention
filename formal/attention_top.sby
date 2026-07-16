@@ -38,14 +38,21 @@
 # Depth: the transition relation still elaborates the full datapath (3
 # RAMs, the ROM, the multipliers, the 16-wide divider bank) even with
 # control-only assertions, so BMC is heavy despite the light property set.
-# Settled at depth 10 (see report for wall time); step to 5 (the
-# documented floor) if 10 does not complete inside the ~4 minute budget.
+# Settled at depth 10 (see report for wall time).
+#
+# Solver (lead-authorized cross-file change, formal-leg iteration 2): z3
+# hangs >10 min stuck on "Checking assumptions in step 1" on this
+# memory-heavy model (3 RAMs + ROM + 16-wide divider bank still in the
+# transition relation, per the note above), independent of the BMC depth
+# target (retested at depth 5, same wall). yices 2.7.0 completes the full
+# depth-10 BMC in about 1 minute on the identical design (trials
+# 2026-07-16, formal/attention_top_*_trial workdirs, since removed).
 [options]
 mode bmc
 depth 10
 
 [engines]
-smtbmc z3
+smtbmc yices
 
 [script]
 read_verilog -sv -formal -DFORMAL mac_unit.sv matmul_tile.sv online_softmax.sv attention_top.sv
