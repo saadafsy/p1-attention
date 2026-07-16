@@ -18,7 +18,7 @@ PWD := $(shell pwd)
 VERILOG_SOURCES = $(PWD)/../../rtl/online_softmax.sv
 
 COCOTB_TOPLEVEL = online_softmax
-COCOTB_TEST_MODULES = test_online_softmax
+COCOTB_TEST_MODULES = test_online_softmax,test_softmax_coverage
 
 EXTRA_ARGS += +incdir+$(PWD)/../..
 EXTRA_ARGS += --coverage-line

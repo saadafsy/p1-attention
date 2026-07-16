@@ -1,0 +1,72 @@
+online_softmax functional coverage report
+seed: 930562133127031167032121786563323809980319571174
+TOTAL: 52/52 reachable bins hit (100.0%), 1 documented-unreachable, 53 bins defined
+
+[score] 7/7 reachable bins hit (100.0%), 0 documented-unreachable
+    HIT         score.eq_min_-32768                hits=233
+    HIT         score.range_-32768_-16384          hits=593
+    HIT         score.range_-16384_0               hits=1423
+    HIT         score.eq_zero                      hits=5
+    HIT         score.range_0_16384                hits=1593
+    HIT         score.range_16384_32767            hits=341
+    HIT         score.eq_max_32767                 hits=135
+[diff_w] 6/6 reachable bins hit (100.0%), 1 documented-unreachable
+    HIT         diff_w.eq_zero                      hits=2379
+    UNREACHABLE diff_w.positive_impossible          hits=0
+    HIT         diff_w.small_negative_-1024_-16     hits=413
+    HIT         diff_w.domain_interior              hits=355
+    HIT         diff_w.clamp_edge_exact_-16384      hits=32
+    HIT         diff_w.below_clamp                  hits=737
+    HIT         diff_w.zero_tail_idx_ge_710         hits=939
+[idx_w] 8/8 reachable bins hit (100.0%), 0 documented-unreachable
+    HIT         idx_w.0                            hits=2400
+    HIT         idx_w.1                            hits=36
+    HIT         idx_w.2-63                         hits=393
+    HIT         idx_w.64-255                       hits=44
+    HIT         idx_w.256-511                      hits=90
+    HIT         idx_w.512-709                      hits=53
+    HIT         idx_w.710-1022                     hits=128
+    HIT         idx_w.1023                         hits=811
+[idx_r] 8/8 reachable bins hit (100.0%), 0 documented-unreachable
+    HIT         idx_r.0                            hits=3557
+    HIT         idx_r.1                            hits=1
+    HIT         idx_r.2-63                         hits=293
+    HIT         idx_r.64-255                       hits=9
+    HIT         idx_r.256-511                      hits=5
+    HIT         idx_r.512-709                      hits=6
+    HIT         idx_r.710-1022                     hits=3
+    HIT         idx_r.1023                         hits=81
+[rescale] 3/3 reachable bins hit (100.0%), 0 documented-unreachable
+    HIT         rescale.identity_0x8000              hits=3756
+    HIT         rescale.genuine_0_to_0x8000          hits=326
+    HIT         rescale.zero                         hits=89
+[l_value] 6/6 reachable bins hit (100.0%), 0 documented-unreachable
+    HIT         l_value.eq_0                         hits=1
+    HIT         l_value.range_0_2p15                 hits=115
+    HIT         l_value.range_2p15_2p21              hits=2696
+    HIT         l_value.range_2p21_2p23              hits=1351
+    HIT         l_value.eq_2p23                      hits=9
+    HIT         l_value.bits23_22_nonzero            hits=692
+[row_length] 6/6 reachable bins hit (100.0%), 0 documented-unreachable
+    HIT         row_length.len_1                        hits=11
+    HIT         row_length.len_2                        hits=29
+    HIT         row_length.len_3-16                     hits=11
+    HIT         row_length.len_17-64                    hits=8
+    HIT         row_length.len_65-255                   hits=12
+    HIT         row_length.len_256                      hits=6
+[control] 5/5 reachable bins hit (100.0%), 0 documented-unreachable
+    HIT         control.row_start_and_valid          hits=3955
+    HIT         control.idle_gap_1                   hits=162
+    HIT         control.idle_gap_2-10                hits=12
+    HIT         control.idle_gap_gt10                hits=1
+    HIT         control.back_to_back_rows            hits=57
+[cross] 3/3 reachable bins hit (100.0%), 0 documented-unreachable
+    HIT         cross.max_updated_x_zero_tail_w    hits=939
+    HIT         cross.identity_r_x_l_gt_2p21       hits=1360
+    HIT         cross.clamp_edge_x_rowlen_256      hits=1
+
+Documented-unreachable bins and reasons:
+  diff_w.positive_impossible: diff_w = s - m_new can never be > 0: m_new = max(m_base, s) by construction (docs/uarch.md section 6), so s <= m_new always and diff_w <= 0 for every accepted element. Asserted structurally (never attempted), and also asserted directly in the RTL FORMAL block (rtl/online_softmax.sv: assert (diff_s <= 17'sd0);).
+
+Unhit reachable bins (coverage gap, should be empty at closure):
+  (none)
