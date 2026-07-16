@@ -1,0 +1,62 @@
+# attention_top formal: BMC over the module's own `ifdef FORMAL block
+# (rtl/attention_top.sv, docs/uarch.md 8.3 "FORMAL block" paragraph).
+# Scope is deliberately control-only per CLAUDE.md ("formal is a subset /
+# do not fight the tool") and per uarch.md 8.3's own statement of the
+# property list: reset state (S_IDLE, busy=0, done=0, cycle_count=0),
+# busy/done mutual exclusion, done implies idle, cycle_count monotone
+# non-decreasing while busy. None of these reference q_mem/k_mem/v_mem/
+# out_mem, the NUM accumulators, the score/rescale arithmetic, or the
+# divider bank; the control FSM's transition conditions depend only on
+# counters (t, kb, rg, row, div_cnt) and start, never on datapath values.
+#
+# Inner-module assertions are stripped below (chformal -assert -remove on
+# mac_unit, matmul_tile, online_softmax) because each of those contracts is
+# already proven standalone and auditor-countersigned (formal/mac_unit.sby,
+# formal/matmul_tile.sby, formal/online_softmax.sby, all PASS, EVIDENCE.md
+# rows). Re-proving them again inside this integration-level BMC would be
+# redundant solver load for zero additional coverage: the three submodules
+# are instantiated here UNMODIFIED (uarch.md 8.3's own words), so their own
+# sby runs already cover their internal invariants over every elaboration.
+#
+# What is NOT proven here, and why that is fine: the running-max-monotonic
+# and DEN-no-overflow invariants for the (m, l) recurrence are proven
+# standalone in formal/online_softmax.sby (same module, same equations,
+# instantiated verbatim 4 times here); the NUM accumulator's own
+# no-overflow bound (uarch.md 3.7) and the divider bank's arithmetic
+# (uarch.md 3.8) are exercised end-to-end, bit-exactly, by cocotb
+# (tb/attention_top/test_attention_top.py) against model/attn.py
+# attn_fixed, not re-attempted in formal: an open bmc flow proving a
+# 34-bit restoring divider or a 48-bit rescale multiply functionally
+# correct, on top of three already-elaborated RAMs and a ROM, is exactly
+# the kind of proof this toolchain cannot do in reasonable time
+# (CLAUDE.md formal-limit note). Keeping the strip in place is what makes
+# this sby tractable at all: the full unstripped netlist (3 RAMs, a ROM,
+# 16+16 multipliers, a 16-wide divider bank, plus the three submodules'
+# own BMC-heavy assertions) is far past what open smtbmc/z3 proves in a
+# reasonable budget.
+#
+# Depth: the transition relation still elaborates the full datapath (3
+# RAMs, the ROM, the multipliers, the 16-wide divider bank) even with
+# control-only assertions, so BMC is heavy despite the light property set.
+# Settled at depth 10 (see report for wall time); step to 5 (the
+# documented floor) if 10 does not complete inside the ~4 minute budget.
+[options]
+mode bmc
+depth 10
+
+[engines]
+smtbmc z3
+
+[script]
+read_verilog -sv -formal -DFORMAL mac_unit.sv matmul_tile.sv online_softmax.sv attention_top.sv
+prep -top attention_top
+chformal -assert -remove mac_unit
+chformal -assert -remove matmul_tile
+chformal -assert -remove online_softmax
+
+[files]
+rtl/mac_unit.sv
+rtl/matmul_tile.sv
+rtl/online_softmax.sv
+rtl/attention_top.sv
+rtl/exp_lut.svh rtl/exp_lut.svh

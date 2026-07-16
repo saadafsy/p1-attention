@@ -1,0 +1,6 @@
+# n cycle_count  (docs/uarch.md 8.3: nblk*(16*nblk+156)+1)
+4 173
+8 377
+16 881
+32 2273
+64 6593
