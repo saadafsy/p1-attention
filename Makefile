@@ -30,6 +30,19 @@ verify-fw verify: lint sim coverage synth-check formal
 	@echo "| verify-$(MODULE) | $(MODULE) passes lint/sim/cov/synth/formal | PASS | make verify MODULE=$(MODULE) | 0 |" >> EVIDENCE.md
 	@echo "VERIFY OK: $(MODULE)" | tee -a EVIDENCE.md
 
+# Phase 4: map to sky130 cells and run OpenSTA. PERIOD_NS is the target.
+LIB ?= $(HOME)/tools/lib/sky130_fd_sc_hd__tt_025C_1v80.lib
+PERIOD_NS ?= 10
+
+synth-netlist:
+	@mkdir -p build
+	yosys -p 'read_verilog -sv $(SRC); hierarchy -top $(MODULE); synth -top $(MODULE); dfflibmap -liberty $(LIB); abc -liberty $(LIB); opt_clean; stat -liberty $(LIB); write_verilog -noattr build/$(MODULE)_netlist.v' 2>&1 | tee build/synth_netlist_$(MODULE).log
+	@grep -q 'Warning\|ERROR' build/synth_netlist_$(MODULE).log && echo "(see log for warnings)" || true
+
+sta:
+	LIB=$(LIB) NETLIST=build/$(MODULE)_netlist.v MODULE=$(MODULE) PERIOD_NS=$(PERIOD_NS) \
+	  opensta -no_init scripts/sta.tcl 2>&1 | tee build/sta_$(MODULE).log
+
 # Phase 0: golden-model cross-check (attn.py vs attn.cpp bit-identical).
 # The EVIDENCE row is appended only if the check exits 0.
 model-check:
