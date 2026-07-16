@@ -9,7 +9,9 @@ ap.add_argument('--func', type=float, default=100.0)
 a = ap.parse_args()
 if os.environ.get('COVERAGE_STUB') == '1':
     print('coverage: STUB pass (COVERAGE_STUB=1, pre-Phase-3)'); sys.exit(0)
-dat = glob.glob('**/coverage.dat', recursive=True) + glob.glob('**/*.dat', recursive=True)
+# Only verilator coverage files. '**/*.dat' would double-count coverage.dat
+# and mis-parse verilator's internal Vtop__verFiles.dat as unhit points.
+dat = glob.glob('**/coverage.dat', recursive=True)
 if not dat:
     print('coverage: no coverage.dat found. Run verilator with --coverage, or set '
           'COVERAGE_STUB=1 for early phases.'); sys.exit(1)

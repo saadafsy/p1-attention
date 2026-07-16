@@ -1,0 +1,9 @@
+# SystemC::Coverage-3
+C 'f/home/owner/p1-attention/tb/mac_unit/../../rtl/mac_unit.svl33n3tlinepagev_line/mac_unitoblockS33-36hmac_unit' 34244
+C 'f/home/owner/p1-attention/tb/mac_unit/../../rtl/mac_unit.svl35n19tbranchpagev_branch/mac_unitocond_thenS35hmac_unit' 2729
+C 'f/home/owner/p1-attention/tb/mac_unit/../../rtl/mac_unit.svl35n20tbranchpagev_branch/mac_unitocond_elseS35hmac_unit' 31515
+C 'f/home/owner/p1-attention/tb/mac_unit/../../rtl/mac_unit.svl36n23tbranchpagev_branch/mac_unitocond_thenS36hmac_unit' 29889
+C 'f/home/owner/p1-attention/tb/mac_unit/../../rtl/mac_unit.svl36n24tbranchpagev_branch/mac_unitocond_elseS36hmac_unit' 4355
+C 'f/home/owner/p1-attention/tb/mac_unit/../../rtl/mac_unit.svl39n3tlinepagev_line/mac_unitoblockS39hmac_unit' 5755
+C 'f/home/owner/p1-attention/tb/mac_unit/../../rtl/mac_unit.svl40n5tbranchpagev_branch/mac_unitoifS40-41hmac_unit' 49
+C 'f/home/owner/p1-attention/tb/mac_unit/../../rtl/mac_unit.svl40n6tbranchpagev_branch/mac_unitoelseS42-43hmac_unit' 5706

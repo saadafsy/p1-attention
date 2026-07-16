@@ -46,7 +46,11 @@
       "Bash(python3 -c \"import numpy; print\\('numpy', numpy.__version__\\)\")",
       "Bash(python3 -c ' *)",
       "Bash(git commit -m 'Phase 0: docs/uarch.md numeric spec + bit-identical golden models \\(py/cpp crosscheck green\\) *)",
-      "Bash(git commit -m 'uarch.md: pin DEN overflow induction, exact divider algorithm, rescale bit-identity \\(pre-Phase-1 Q&A\\) *)"
+      "Bash(git commit -m 'uarch.md: pin DEN overflow induction, exact divider algorithm, rescale bit-identity \\(pre-Phase-1 Q&A\\) *)",
+      "Bash(~/tools/oss-cad-suite/bin/verilator_coverage --annotate /tmp/claude-1000/-home-owner-p1-attention/d019ed67-f90b-4809-a785-93d805413c44/scratchpad/cov_annot tb/mac_unit/coverage.dat)",
+      "Bash(awk '{if \\(int\\($NF\\)==0\\) print}')",
+      "Bash(sby -f formal/mac_unit.sby)",
+      "Bash(git commit -m 'Phase 1: mac_unit green through full verify \\(4/4 cocotb vs golden, 100% line cov, no latches, sby PASS\\) *)"
     ]
   }
 }
