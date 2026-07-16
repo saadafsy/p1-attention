@@ -41,7 +41,11 @@
       "Bash(echo \"lint exit=$?\")",
       "Bash(git init *)",
       "Bash(git add *)",
-      "Bash(git commit -m 'Phase -1: toolchain proven, tool_smoke verifies green *)"
+      "Bash(git commit -m 'Phase -1: toolchain proven, tool_smoke verifies green *)",
+      "Bash(git config *)",
+      "Bash(python3 -c \"import numpy; print\\('numpy', numpy.__version__\\)\")",
+      "Bash(python3 -c ' *)",
+      "Bash(git commit -m 'Phase 0: docs/uarch.md numeric spec + bit-identical golden models \\(py/cpp crosscheck green\\) *)"
     ]
   }
 }
