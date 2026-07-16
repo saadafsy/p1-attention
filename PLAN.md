@@ -6,8 +6,8 @@ Only Lead moves a task to [Done], and only after: make verify exits 0, an EVIDEN
 exists, a Beta auditor countersigned, AND I passed "grill me". I write all rtl/ and formal/.
 
 ## Phase 0 — Golden models + fixed-point study
-- [Todo] model/attn.py        (domain: sandbox)  owner: ME (agent may review)
-- [Todo] model/attn.cpp       (domain: sandbox)  owner: ME (agent may review)
+- [Ready] model/attn.py        (domain: sandbox)  built per builder-mode decision; crosscheck green (make model-check, EVIDENCE row)
+- [Ready] model/attn.cpp       (domain: sandbox)  built per builder-mode decision; bit-identical to attn.py on 14 cases
 
 ## Phase 1 — Core datapath RTL (I write; agent tutors + reviews)
 - [Todo] rtl/mac_unit.sv           (domain: sandbox)  owner: ME
