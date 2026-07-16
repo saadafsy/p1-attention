@@ -32,9 +32,9 @@ exists, a Beta auditor countersigned, AND I passed "grill me". I write all rtl/ 
 ## --- CORE COMPLETE ABOVE. Phases 6-7 do NOT start until 0-5 are Done. ---
 
 ## Phase 6 — FPGA (hardware, cannot reach Done in sandbox)
-- [Blocked: needs bench] fpga_bringup   (domain: hardware)
+- [Blocked: needs bench] fpga_bringup   (domain: hardware)  Basys 3 / XC7A35T / Vivado; guide: docs/phase6_fpga_guide.md; PENDING-HARDWARE until bench evidence
 
 ## Phase 7 — Physical design + silicon
-- [Todo] openlane RTL-to-GDS on the tile + KLayout screenshot  (domain: sandbox)
-- [Todo] VCD switching-activity power estimate                 (domain: sandbox)
-- [Blocked: needs bench] tinytapeout_silicon  (domain: hardware)
+- [Todo] openlane RTL-to-GDS on the tile + KLayout screenshot  (domain: sandbox)  guide: docs/phase7_physical_guide.md
+- [Todo] VCD switching-activity power estimate                 (domain: sandbox)  guide: docs/phase7_physical_guide.md section 7
+- [Blocked: needs bench] tinytapeout_silicon  (domain: hardware)  ~$100 shuttle seat; guide: docs/phase7_physical_guide.md section 8; PENDING-HARDWARE
