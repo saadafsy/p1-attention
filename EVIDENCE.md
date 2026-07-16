@@ -16,3 +16,7 @@ VERIFY OK: attn_model
 VERIFY OK: mac_unit
 | audit-mac_unit-lint-synth | lint-synth-auditor independent re-run: verilator+verible lint clean, yosys check 0 problems, no $_DLATCH_, netlist latch-free | PASS | agent re-ran make lint + make synth-check + yosys synth, 2026-07-16 | 0 |
 | audit-mac_unit-formal-coverage | formal-coverage-auditor independent re-run: cocotb 4/4 on two seeds, line coverage 100%, sby BMC PASS; gaps noted in report | PASS | agent re-ran make sim (SEED=1,7) + check_coverage + sby, 2026-07-16 | 0 |
+| verify-matmul_tile | matmul_tile passes lint/sim/cov/synth/formal | PASS | make verify MODULE=matmul_tile | 0 |
+VERIFY OK: matmul_tile
+| audit-matmul_tile-lint-synth | lint-synth-auditor independent re-run: multi-file lint clean, yosys check 0 problems, no $_DLATCH_, netlist 384 FF latch-free, packing/signedness verified vs uarch 8.1 | PASS | agent re-ran make lint + make synth-check + yosys synth, 2026-07-16 | 0 |
+| audit-matmul_tile-formal-coverage | formal-coverage-auditor independent re-run: cocotb 6/6 on two genuinely different seeds, tile line coverage 100%, sby BMC depth5 PASS; chformal reduction audited non-vacuous and justified | PASS | agent re-ran make sim (SEED=1,7) + check_coverage + sby + SMT2 inspection, 2026-07-16 | 0 |

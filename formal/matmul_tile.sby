@@ -1,0 +1,39 @@
+# Inner mac_unit assertions are stripped below (chformal -assert -remove
+# mac_unit) because that contract is already proven standalone: see
+# formal/mac_unit.sby (PASS, auditor-countersigned, EVIDENCE.md mac_unit
+# rows). Re-proving 16 replicated copies of the identical mac_unit contract
+# inside this tile-level BMC is redundant solver load with no additional
+# coverage (CLAUDE.md "formal is a subset / do not fight the tool"): the
+# 16 instances are wired identically by the same generate body, so proving
+# the contract once, standalone, covers all 16 elaborations of it.
+#
+# What remains and stays PROVEN here (matmul_tile.sv's own `ifdef FORMAL
+# block, tile-level, not touched by the strip below):
+#   - reset: all 384 acc_flat bits go to 0
+#   - clr && !en: all 384 acc_flat bits go to 0
+#   - hold (!en, no clr): acc_flat unchanged
+#   - one representative datapath element, (0,0): both the clr&&en load
+#     and the clr==0&&en accumulate cases recompute the exact q*k product
+#     and re-check it against acc_flat[23:0]
+# This covers the shared-control glue over the full 384-bit bus plus one
+# spot-check of the broadcast/packing wiring. The remaining 15 datapath
+# elements are NOT covered by formal after this change; that is exactly
+# what the cocotb TB (tb/matmul_tile/test_matmul_tile.py) exhaustively
+# covers instead (all 16 elements, every trial, including the asymmetric
+# broadcast-independence test built specifically to catch a swapped/
+# transposed (i,j) wiring bug that a single-element formal check cannot).
+[options]
+mode bmc
+depth 5
+
+[engines]
+smtbmc z3
+
+[script]
+read_verilog -sv -formal -DFORMAL mac_unit.sv matmul_tile.sv
+prep -top matmul_tile
+chformal -assert -remove mac_unit
+
+[files]
+rtl/mac_unit.sv
+rtl/matmul_tile.sv
