@@ -1,2 +1,3 @@
 rtl/tool_smoke.sv
 rtl/mac_unit.sv
+rtl/matmul_tile.sv

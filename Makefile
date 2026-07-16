@@ -1,9 +1,11 @@
 MODULE ?= mac_unit
 SEED   ?= 1
-SRC    := rtl/$(MODULE).sv
+# All RTL is passed to lint/synth with an explicit top so multi-module
+# designs (matmul_tile instantiates mac_unit) elaborate correctly.
+SRC    := $(wildcard rtl/*.sv)
 
 lint:
-	verilator --lint-only -Wall -sv $(SRC)
+	verilator --lint-only -Wall -sv --top-module $(MODULE) $(SRC)
 	verible-verilog-lint $(SRC)
 
 # MODULE= (empty) is required: our MODULE var leaks into the sub-make via

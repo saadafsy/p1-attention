@@ -1,0 +1,9 @@
+# SystemC::Coverage-3
+C 'f/home/owner/p1-attention/tb/matmul_tile/../../rtl/mac_unit.svl33n3tlinepagev_line/mac_unitoblockS33-36hmatmul_tile.g_row[*].u_mac' 399200
+C 'f/home/owner/p1-attention/tb/matmul_tile/../../rtl/mac_unit.svl35n19tbranchpagev_branch/mac_unitocond_thenS35hmatmul_tile.g_row[*].u_mac' 34528
+C 'f/home/owner/p1-attention/tb/matmul_tile/../../rtl/mac_unit.svl35n20tbranchpagev_branch/mac_unitocond_elseS35hmatmul_tile.g_row[*].u_mac' 364672
+C 'f/home/owner/p1-attention/tb/matmul_tile/../../rtl/mac_unit.svl36n23tbranchpagev_branch/mac_unitocond_thenS36hmatmul_tile.g_row[*].u_mac' 334000
+C 'f/home/owner/p1-attention/tb/matmul_tile/../../rtl/mac_unit.svl36n24tbranchpagev_branch/mac_unitocond_elseS36hmatmul_tile.g_row[*].u_mac' 65200
+C 'f/home/owner/p1-attention/tb/matmul_tile/../../rtl/mac_unit.svl39n3tlinepagev_line/mac_unitoblockS39hmatmul_tile.g_row[*].u_mac' 67632
+C 'f/home/owner/p1-attention/tb/matmul_tile/../../rtl/mac_unit.svl40n5tbranchpagev_branch/mac_unitoifS40-41hmatmul_tile.g_row[*].u_mac' 800
+C 'f/home/owner/p1-attention/tb/matmul_tile/../../rtl/mac_unit.svl40n6tbranchpagev_branch/mac_unitoelseS42-43hmatmul_tile.g_row[*].u_mac' 66832
