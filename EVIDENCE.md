@@ -26,3 +26,5 @@ VERIFY OK: attn_model
 VERIFY OK: online_softmax
 | audit-online_softmax-lint-synth | lint-synth-auditor independent re-run: lint clean, yosys check 0 problems, no $_DLATCH_, netlist latch-free (73 FFs), arithmetic verified vs uarch 6/3.5, generated ROM diff-identical to emitter | PASS | agent re-ran make lint + make synth-check + yosys synth + emitter diff, 2026-07-16 | 0 |
 | audit-online_softmax-formal-coverage | formal-coverage-auditor independent re-run: cocotb 7/7 on two seeds, coverage 99.9% (sole miss = unreachable generated default arm, verified), sby depth20 PASS non-vacuous; alignment and rescale-identity checks audited | PASS | agent re-ran make sim (SEED=1,7) + check_coverage + sby + SMT2 inspection, 2026-07-16 | 0 |
+| verify-attention_top | attention_top passes lint/sim/cov/synth/formal | PASS | make verify MODULE=attention_top | 0 |
+VERIFY OK: attention_top

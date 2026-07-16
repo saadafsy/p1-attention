@@ -532,6 +532,24 @@ module attention_top (
   initial f_past_valid = 1'b0;
   always_ff @(posedge clk) f_past_valid <= 1'b1;
 
+  // Formal-only reset constraint (standard idiom; exempt from the
+  // no-initial-in-RTL rule along with the rest of this block). Without it,
+  // BMC's `anyinit` starting state is a fully free/unconstrained variable
+  // assignment (state, busy, done, cycle_count all arbitrary), so an FSM
+  // STATE INVARIANT like "done implies idle" can be falsified at step 0/1
+  // by a garbage initial state that a real reset can never produce (e.g.
+  // done=1 with state != S_IDLE, never reachable from state <= S_IDLE at
+  // reset). Guarding a property with f_past_valid only delays which step
+  // it is checked at; it does not constrain what the state itself can be,
+  // so it cannot fix this class of counterexample. `initial assume (rst)`
+  // scopes the BMC trace space to reset-reachable traces, the honest
+  // bounded claim for these FSM state invariants. The pure TRANSITION
+  // properties in mac_unit.sv/online_softmax.sv (this-cycle-output as a
+  // function of last-cycle-inputs, no reference to "the state must be
+  // X") do not need this: they are true for any starting state by
+  // construction, so they are proven unconditionally, not just from reset.
+  initial assume (rst);
+
   always_comb begin
     // busy/done mutual exclusion. Guarded by f_past_valid like every other
     // property in this block: unguarded, BMC checks this at step 0 too,
