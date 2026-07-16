@@ -1,0 +1,13 @@
+[options]
+mode bmc
+depth 30
+
+[engines]
+smtbmc z3
+
+[script]
+read_verilog -sv -formal -DFORMAL tool_smoke.sv
+prep -top tool_smoke
+
+[files]
+rtl/tool_smoke.sv

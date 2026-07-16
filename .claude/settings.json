@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      { "matcher": "Edit|Write",
+        "hooks": [ { "type": "command",
+          "command": "bash $CLAUDE_PROJECT_DIR/.claude/hooks/lint_on_edit.sh" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command",
+          "command": "bash $CLAUDE_PROJECT_DIR/.claude/hooks/verify_gate.sh" } ] }
+    ]
+  }
+}
