@@ -1,0 +1,13 @@
+[options]
+mode bmc
+depth 20
+
+[engines]
+smtbmc z3
+
+[script]
+read_verilog -sv -formal -DFORMAL mac_unit.sv
+prep -top mac_unit
+
+[files]
+rtl/mac_unit.sv

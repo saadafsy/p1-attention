@@ -67,7 +67,11 @@ is exact (no rounding: integer multiply).
 
 Sum of D = 16 products: |sacc_raw| <= 16 * 2^14 = 2^18, value <= 64.
 Minimum signed width to hold +2^18 is 20 bits. Chosen width 24 (byte aligned,
-Q11.12): headroom up to |sum| < 2^23 raw, i.e. D <= 2^23 / 2^14 = 512.
+Q11.12): headroom up to |sum| < 2^23 raw. Note the exact edge: the positive
+bound D * 2^14 must stay <= 2^23 - 1, so the headroom claim is D <= 511; at
+D = 512 the single all-(-128)^2 pattern sums to exactly +2^23, one past the
+signed max. Irrelevant at D = 16 but stated precisely because the mac_unit
+testbench pokes at this exact corner.
 Accumulation is exact: no rounding, no saturation, overflow impossible by the
 bound above (asserted in the models).
 

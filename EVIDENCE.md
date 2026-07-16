@@ -12,3 +12,5 @@ VERIFY OK: tool_smoke
 VERIFY OK: attn_model
 | model-crosscheck | attn.py and attn.cpp bit-identical on random + corner cases; exp LUT emitted; float gate met | PASS | make model-check | 0 |
 VERIFY OK: attn_model
+| verify-mac_unit | mac_unit passes lint/sim/cov/synth/formal | PASS | make verify MODULE=mac_unit | 0 |
+VERIFY OK: mac_unit
