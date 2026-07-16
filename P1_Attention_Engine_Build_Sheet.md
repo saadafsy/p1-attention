@@ -57,6 +57,12 @@ Core RTL + verification is the meal. Physical design is garnish. Never garnish b
 - Port the systolic tile to an FPGA board (digital-design course board or cheap iCE40/Artix).
 - Deliverable: "demonstrated on FPGA" + a short bring-up note.
 - COVERS: FPGA (always "a plus"); emulation-adjacent answer.
+- EXECUTION SPECIFICS (pinned 2026-07-16): target board is a Digilent Basys 3
+  (Xilinx Artix-7 XC7A35T-1CPG236C, Vivado toolchain). Candidate design:
+  matmul_tile (fits trivially) or a trimmed attention_top. Multi-bit Q/K/V I/O
+  goes over UART or Vivado ILA/VIO since it cannot fit switches/LEDs. Full
+  beginner walkthrough: docs/phase6_fpga_guide.md. Requires the physical board:
+  every result stays PENDING-HARDWARE until bench evidence exists.
 
 ### PHASE 7 — Physical design + silicon [closes PD/CMOS/power bullets] (~2-3 weekends)
 - 7a. OpenLane/OpenROAD full flow on the tile (or the P2 FIFO): synthesis -> floorplan -> placement -> CTS -> routing -> GDS on Sky130. One timing-closure iteration. Open layout in KLayout; screenshot.
@@ -66,6 +72,12 @@ Core RTL + verification is the meal. Physical design is garnish. Never garnish b
 - 7c. (Optional, ~$100, shuttle-dependent) TinyTapeout submission of the tile/FIFO: fabricated Sky130 silicon + devkit measurement plan (clock sweep, measured-vs-sim table).
   - COVERS: silicon instrumentation / post-silicon validation; standard-cell/CMOS talking points (Sky130 PDK); the rarest undergrad line — taped-out silicon.
 - 7d. (Optional add-ons if chasing full 100%) OpenROAD PDN + static IR-drop (the honest "noise" bullet); Fault ATPG on the netlist for scan/fault-coverage (DFT bullet); xschem+ngspice inverter/ring-osc on Sky130 (CMOS artifact).
+- EXECUTION SPECIFICS (pinned 2026-07-16): full beginner walkthrough for the
+  OpenLane/Sky130 flow, report reading, KLayout, VCD power, and the TinyTapeout
+  submission path (8-in/8-out constraint, ~$100, shuttle deadlines):
+  docs/phase7_physical_guide.md. GDS and the power estimate are
+  sandbox-achievable (OpenLane Docker, Phase 7 only per the CLAUDE.md rule);
+  fabricated silicon needs a shuttle seat and money and stays PENDING-HARDWARE.
 
 ### EXPLICITLY NOT CHASED
 Commercial signoff (crosstalk SI, IR-drop on PrimeTime-SI/Tempus/Voltus), emulation platforms
