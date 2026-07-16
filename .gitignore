@@ -8,3 +8,4 @@ __pycache__/
 # sby working directories (formal/<module>/ created per run; .sby files are tracked)
 formal/*/
 obj_dir/
+.claude/settings.local.json
