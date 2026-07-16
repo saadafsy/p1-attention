@@ -10,3 +10,5 @@ a row with real bench evidence.
 VERIFY OK: tool_smoke
 | model-crosscheck | attn.py and attn.cpp bit-identical on random + corner cases; exp LUT emitted; float gate met | PASS | make model-check | 0 |
 VERIFY OK: attn_model
+| model-crosscheck | attn.py and attn.cpp bit-identical on random + corner cases; exp LUT emitted; float gate met | PASS | make model-check | 0 |
+VERIFY OK: attn_model

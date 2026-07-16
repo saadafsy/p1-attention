@@ -159,10 +159,37 @@ resource. Revisit only if the Phase 2 benchmark shows the error budget failing.
 
 ### 3.6 DEN: denominator accumulator, UQ9.15 in 24 bits
 
-l = sum over j of (rescaled) w_j. Every term is <= 1.0 (w <= 1, r <= 1, and
-rescaling only shrinks), so l <= N <= N_MAX = 256, needing 9 integer bits
-(UQ9 spans [0, 512)). 9 + 15 = 24 bits. Overflow impossible for N <= 256 by
-construction (asserted). Rescale intermediate l*r is 24u x 16u = 40 bits.
+Declared format: UNSIGNED Q9.15, 24 bits, raw range [0, 2^24-1], value
+range [0, 512).
+
+l = sum over j of (rescaled) w_j, each w_j <= 1.0. At the project N = 64 the
+value reaches at most 64.0, so at least 7 integer bits are required (UQ7
+spans [0, 128)). The declared 9 integer bits cover the architectural
+N_MAX = 256 (l <= 256 < 512) and byte-align the register to 24 bits.
+
+Overflow proof, BY INDUCTION, including the rounding term (this is the part a
+"each term <= 1, so sum <= N" hand-wave skips):
+
+  Claim: after j terms, l_raw <= j * 2^15.
+  Base: l_0 = 0.
+  Step: l_{j+1} = rshr(l_j * r, 15) + w  with r <= 2^15, w <= 2^15.
+    rshr(l_j * r, 15) = floor((l_j * r + 2^14) / 2^15)
+    l_j * r + 2^14 <= l_j * 2^15 + 2^14 < (l_j + 1) * 2^15
+    so rshr(l_j * r, 15) <= l_j  (the round-half-up bias can NEVER push the
+    rescaled value above the unrescaled one, for any r <= 2^15 and any l_j).
+    Hence l_{j+1} <= l_j + 2^15 <= (j+1) * 2^15.
+
+  Therefore l_raw <= N * 2^15: at N = 64, l <= 2^21; at N_MAX = 256,
+  l <= 2^23 < 2^24 - 1. No overflow, with zero margin consumed by rounding.
+  Both models assert 0 <= l < 2^24 on every update, so the bound is machine
+  checked on every cross-check run, not just proved on paper.
+
+Lower bound (needed by 3.8): the element that set the final running max
+contributed w = lut[0] = 2^15 at its step, and every later step multiplies l
+by r = 0x8000 which is bit-exact identity (Section 6, identity 1) before
+adding a non-negative w. So at the end of any row, 2^15 <= l_raw <= N * 2^15.
+
+Rescale intermediate l*r is 24u x 16u = 40 bits, never stored.
 
 ### 3.7 NUM: weighted-V accumulator, Q10.21 in 32 bits
 
@@ -173,21 +200,60 @@ integer bits (Q10 spans [-1024, 1024)); 1 + 10 + 21 = 32 bits.
 Overflow impossible for N <= 256 (asserted). Rescale intermediate acc*r is
 32s x 16u = 48 bits.
 
-### 3.8 Output: Q1.6 in 8 bits, and why the division needs no extra scaling
+### 3.8 Output division: a true divider, NOT a reciprocal LUT
 
-out = num / den. Scales: num raw = value * 2^21, den raw = value * 2^15, so
+Method: exact integer division (serial restoring divider in RTL), performed
+once per output element. Output format Q1.6 int8. Rounding: round-half-up,
+the same single policy as everywhere else (Section 4).
+
+Why the scales make the division self-normalizing: num raw = value * 2^21,
+den raw = value * 2^15, so
   num_raw / den_raw = out_value * 2^(21-15) = out_value * 2^6
-which is exactly the Q1.6 raw output. Therefore:
-  out_raw = sat8( round_half_up( num_raw / den_raw ) )
-implemented in exact integer arithmetic as floor((2*num + den) / (2*den)).
+which is exactly the Q1.6 raw output. No pre-shift, no post-shift.
 
-No division by zero: after the final max update, the max element contributed
-w = exp(0) = 32768 and every subsequent step multiplied l by r = 0x8000 which
-is the exact identity (3.9), so den_raw >= 32768 always (N >= 1).
+The NORMATIVE quotient definition, identical in both models and binding on
+the RTL:
+  out_raw = sat8( floor( (2*num_raw + den_raw) / (2*den_raw) ) )
+i.e. round-half-up of num/den, expressed in exact integers. In the models:
+attn.py divr() uses Python's floor-division operator; attn.cpp divr() goes
+through floordiv() because C++ '/' truncates toward zero. floor and
+trunc-toward-zero differ exactly when the numerator (2*num + den) is negative
+and the division is inexact; the random cross-check cases contain negative
+accumulators (random V), so a trunc-vs-floor bug cannot survive make
+model-check.
 
-Output saturation is defensive: out is a convex combination of v values
-(weights sum to 1 in exact rationals before the final rounding), so
-out_value <= max|v| and round() of a number <= 127.0 cannot exceed 127.
+RTL divider algorithm (the direct floor-division realization; latency is
+implementation detail, the arithmetic is not):
+  A  = 2*num + den        34-bit signed  (|2*num| <= 2^31, den < 2^24)
+  B  = 2*den              25-bit unsigned, B >= 2^16 (den >= 2^15, see 3.6)
+  qt = |A| / B, rt = |A| mod B     unsigned restoring divide, trunc semantics
+  q  = (A >= 0) ? qt : -(qt + (rt != 0))    converts trunc to floor
+  out_raw = sat8(q)
+The (rt != 0) correction on negative A is exactly the floor adjustment; check:
+floor(A/B) for A < 0 equals -ceil(|A|/B) = -(qt + (rt != 0)).
+
+Quotient is tiny: |q| <= 128 (out is a convex combination of int8 v values,
+weights summing to exactly 1 in the pre-rounding rationals), so the divider
+produces at most 8 magnitude bits. Saturation to [-128, 127] is defensive:
+round-half-up of a value <= 127.0 cannot exceed 127.
+
+No division by zero: den_raw >= 2^15 always (lower bound proof in 3.6).
+
+Error bound of this stage: the division is exact up to the single final
+rounding, contributing at most 1/2 LSB of Q1.6 (2^-7 in value) to the output.
+It adds NO other error term; the Section 7 budget counts it as exactly that.
+
+Why not a reciprocal LUT + multiply: den spans [1, 256] in value (a 23-bit
+raw dynamic range), so a direct reciprocal table is either huge or coarse; a
+k-bit-index table contributes up to 2^-k RELATIVE error on the whole output,
+i.e. another multi-LSB error source on top of Section 7, plus a 32x16
+multiplier and a second rounding site that both golden models would have to
+replicate. Newton-Raphson refinement needs two more multiplies per output.
+The serial divider is one small subtract-shift unit, bit-exactly matches
+floor division, and its latency (about 34 cycles once per output element)
+hides behind the next row's accumulation in attention_top. Revisit only if
+Phase 4 timing shows the divider on the critical path, and then only as a
+spec change to this section.
 
 ## 4. Rounding policy (single policy, six sites)
 
@@ -242,6 +308,37 @@ All quantities are raw integers in the formats of Section 2. Per query row:
 
   out[k] = sat8( floor( (2*acc[k] + l) / (2*l) ) )   Q1.6
 
+### 6.1 The rescale on a running-max update, precisely
+
+When m_new > m, every already-accumulated exp term is implicitly
+exp(s - m_old) and must become exp(s - m_new); online softmax does this by one
+multiply with r = exp(m_old - m_new), fetched from the SAME LUT as the
+weights (no second table, no second approximation method):
+
+  denominator: l   <- rshr(l * r, 15) + w
+               l * r is 24u x 16u = 40 bits, never registered;
+               rshr adds 2^14 then arithmetic-shifts right 15
+               (= floor(x/2^15 + 1/2), round-half-up).
+  numerator:   acc <- rshr(acc * r, 15) + w * v
+               acc * r is 32s x 16u = 48 bits signed, same rshr;
+               the arithmetic shift on a NEGATIVE product is a floor,
+               which is exactly what round-half-up requires.
+
+Bit-identity between the models: attn.py rshr() computes
+(x + 2^14) >> 15 using Python's floor-semantics shift; attn.cpp rshr()
+computes floordiv(x + 2^14, 2^15). These are the same function on all of Z,
+including negative acc * r. It is a deliberate pair of DIFFERENT
+implementations of one spec, so a floor/trunc confusion in either language
+shows up as a cross-check mismatch. The 'monotonic-n64' case exists precisely
+for this: its scores strictly increase, forcing a genuine rescale (r < 0x8000)
+with sign-mixed accumulators on every one of its 64 steps; the five random
+N = 64 cases exercise sparse, irregular max updates.
+
+Rescale error: each real rescale rounds once, at most 1/2 ulp of the target
+format (2^-16 of DEN value, 2^-22 of NUM value); at most N-1 rescales can
+occur, and steps without a max update contribute ZERO error by identity 1
+below. The Section 7 budget carries this as the negligible N * 2^-16 term.
+
 Two identities the RTL may rely on (and the testbench should check):
 
 1. r = 0x8000 (max unchanged) is an EXACT identity: rshr(x * 32768, 15) = x
@@ -295,9 +392,10 @@ Build order: mac_unit -> matmul_tile -> online_softmax -> attention_top.
 | online_softmax | per-row (m, l) state, LUT, rescale multiplier, emits w and r |
 | attention_top  | row streamer, NUM accumulators, final divider, tile control  |
 
-The final divider is a 32/24 unsigned-magnitude serial restoring divider
-(about 32 cycles); it is off the per-element critical loop because it runs
-once per output element after row accumulation completes.
+The final divider implements the Section 3.8 algorithm exactly (unsigned
+restoring core with the negative-numerator floor correction, about 34 cycles
+serial); it is off the per-element critical loop because it runs once per
+output element after row accumulation completes.
 
 Naming conventions (binding for all RTL):
 - snake_case for signals and modules; module name = file name.
