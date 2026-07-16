@@ -533,8 +533,12 @@ module attention_top (
   always_ff @(posedge clk) f_past_valid <= 1'b1;
 
   always_comb begin
-    // busy/done mutual exclusion, always.
-    assert (!(busy && done));
+    // busy/done mutual exclusion. Guarded by f_past_valid like every other
+    // property in this block: unguarded, BMC checks this at step 0 too,
+    // where all registers (including state) are unconstrained free
+    // variables, producing an unreachable state=S_COMPUTE && done=1
+    // counterexample at step 0 that never occurs from a real reset.
+    if (f_past_valid) assert (!(busy && done));
   end
 
   always_ff @(posedge clk) begin
