@@ -1,0 +1,10 @@
+# Generated simulation/build artifacts (not evidence; EVIDENCE.md is tracked)
+tb/*/sim_build/
+tb/*/results.xml
+tb/*/dump.vcd
+build/
+__pycache__/
+*.pyc
+# sby working directories (formal/<module>/ created per run; .sby files are tracked)
+formal/*/
+obj_dir/
