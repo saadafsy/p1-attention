@@ -1,0 +1,26 @@
+// coverage.vlt: verilator coverage config for tb/attention_top.
+//
+// Excludes the generated exp_lut.svh ROM (rtl/exp_lut.svh, docs/uarch.md
+// 8.2/3.5) from THIS testbench's line-coverage instrumentation.
+//
+// Rationale: the ROM's 1024 case arms are already exhaustively covered and
+// equivalence-proven, entry for entry, in tb/online_softmax
+// (rom_full_sweep sweeps every one of the 1024 indices against
+// model/exp_lut.hex, plus the sha256-pinned/entry-for-entry check at TB
+// import time). End-to-end attention stimulus through this integration
+// testbench drives 4 online_softmax lane instances at once and cannot, and
+// should not try to, re-sweep all 1024 ROM arms through 4 lanes just to
+// keep a generic line-coverage percentage happy: doing so would burn
+// thousands of extra cycles of stimulus whose only purpose is to re-prove
+// a fact already proven standalone elsewhere, and leaving the ROM
+// instrumented here would poison THIS module's own coverage gate with
+// 1024+ points that are not attention_top's verification target (its
+// target is the FSM/round-robin-drain/NUM-accumulator/divider-bank
+// integration, not the ROM contents). Verified empirically before landing
+// this file: an instrumented build of online_softmax.sv alone shows 1026
+// coverage points inside exp_lut.svh (out of 1045 total) with no filter,
+// and exactly 0 with this `coverage_off` directive in place (total drops
+// to 19), confirming the directive does what it claims for verilator
+// 5.051's --coverage-line and is not a no-op.
+`verilator_config
+coverage_off -file "*/exp_lut.svh"
