@@ -588,3 +588,181 @@ Golden model files:
 - model/crosscheck.py: generates random and corner cases, proves the two
   models bit-identical, reports the measured float error. Run via
   make model-check, which appends the EVIDENCE.md row on success.
+
+### 8.3 attention_top: 4-row-blocked integration (NORMATIVE, Phase 2)
+
+Function: stitches matmul_tile (8.1) and online_softmax (8.2), unchanged, into
+the full streaming attention recurrence of Section 6, for N = n_len rows
+self-attention (Q, K, V all n_len x D=16), n_len a multiple of 4 in [4, 64].
+This module owns the NUM accumulators (3.7), the score conversion (3.3,
+rounding site 1) and the output divider (3.8, rounding site 5); mac_unit,
+matmul_tile and online_softmax are instantiated exactly as verified, no
+changes.
+
+Dataflow decision: query rows are processed in groups of 4 (matching the
+tile's 4x4 shape). Per group, key/value blocks of 4 are streamed through
+matmul_tile one D=16-cycle block at a time; while block b+1 computes, block
+b's already-finished 4x4 SACC block is drained into 4 online_softmax
+instances (one per query row / "lane" in the group), one score per lane
+every 4 cycles, round-robin over the block's 16-cycle period. This is a
+software-pipelined double buffer: matmul_tile's own accumulator IS one
+buffer; a captured 384-bit register (drain_buf) is the other. The capture
+happens on the same clock edge that starts the next block's clr, so there
+is no dead cycle (mirrors matmul_tile's own back-to-back clr contract,
+tb/matmul_tile/test_matmul_tile.py golden_block_streaming).
+
+Capture value, precisely (the one subtlety that is easy to get wrong by one
+cycle): at the edge ending the block's t=15 cycle, matmul_tile's acc_flat is
+ANOTHER module's registered output; a same-edge register-to-register read
+sees the PRE-edge value by NBA semantics, which at that instant still holds
+only the sum through d=0..14 (d=15's product takes effect only via that same
+edge's own NBA update, i.e. one edge later than a naive capture would
+assume). Rather than shift the whole round-robin read schedule by a cycle
+to compensate, attention_top computes the missing d=15 outer product
+combinationally, from that same cycle's own q_flat/k_flat (which already
+carry the d=15 operands), and adds it to acc_flat before registering
+drain_buf: drain_buf <= acc_flat + (q_flat . k_flat outer product at d=15).
+This keeps the capture aligned exactly at t=15 with no extra cycle and no
+window-straddling read timing elsewhere.
+
+Round-robin addressing: over cycle t = 0..15 of a block period,
+lane = t[1:0] (t mod 4, the query row within the group), key_local = t[3:2]
+(t / 4, the key row within the drained block, ascending). This preserves
+per-lane ascending key order (Section 6's "element order matters" streaming
+note): lane L sees key_local 0,1,2,3 in that order, at cycles L, L+4, L+8,
+L+12.
+
+Score conversion (rounding site 1, 3.3) happens at drain time, combinationally,
+once per cycle, from whichever (lane, key_local) element of drain_buf is
+addressed that cycle: s = sat16((sacc + 8) >>> 4). Only one element is
+converted per cycle (matching one online_softmax accept per cycle), so no
+separate 16-wide SCORE buffer is needed.
+
+Since query and key/value share one n_len, the number of query row groups
+equals the number of key/value blocks: nblk = n_len / 4. The FlashAttention
+carry (Section 6's (m, l) running max/denominator across key blocks) is
+exactly online_softmax's own (m, l) state persisting across the nblk drains
+of one row group; attention_top does not re-derive it, it only sequences
+which SACC block feeds which lane when.
+
+PV (numerator) path: on lane L's out_valid (one cycle after in_valid, per
+online_softmax's own timing contract, 8.2), attention_top updates lane L's
+16-wide NUM bank in that one cycle, k-parallel:
+  acc_base[k] = row_start_d[L] ? 0 : acc[L][k]     (mirrors online_softmax's
+                                                     own l_base pattern)
+  acc[L][k]  <= rshr(acc_base[k] * r, 15) + w * v_row[k]     (3.7, 6.1)
+r, w come from lane L's registered outputs; v_row is V's row for the element
+that produced this (w, r), i.e. the SAME v row that was fed to the lane one
+cycle earlier. Because round-robin guarantees at most one lane fires
+out_valid on any given cycle in steady state, and even at the two lane
+handoffs the writes target disjoint (lane, k) storage, ONE shared 16-wide PV
+datapath (16 parallel rescale-multiply-add lanes, replicated by k) suffices;
+it is instantiated once and driven by whichever lane's out_valid is
+currently high. Two 1-cycle pipeline registers per lane (row_start_d[L],
+vrow_pipe[L]) carry row_start and the V row address from the in_valid cycle
+to the out_valid cycle, exactly mirroring online_softmax's internal
+row_start-to-l_base alignment (8.2) so acc[L] resets to 0 on the row's first
+element instead of accumulating stale data from the previous row group.
+
+acc*r intermediate: 48-bit signed (32s x 16u, 3.7/6.1); rshr rounds with the
+same round-half-up bias as online_softmax's l path, arithmetic-shifted so a
+negative acc*r floors correctly (6.1). w*v intermediate: 24-bit signed exact
+(16u x 8s, Section 2). Truncating the wide rescaled intermediate down to the
+32-bit NUM register (after rounding) is safe by the same style of argument as
+online_softmax's l_resc truncation (8.2): the 3.7 induction bound guarantees
+the true value always fits.
+
+Divider bank (3.8, rounding site 5, exactly the normative algorithm, no
+shortcuts): after a row group's last drain (S_DRAIN_LAST below) the row's
+(acc[L][*], l[L]) are stable (no more in_valid pulses touch them), so the
+divisions for that group's 4 rows run sequentially, one row at a time, a
+16-wide bank of serial restoring dividers (one instance per k, replicated,
+identical control):
+  A = 2*num + den      34-bit signed   (2*num via <<< 1 into a 34-bit signed
+                                         register, den zero-extended)
+  B = 2*den             25-bit unsigned (den << 1; shared across the 16 k
+                                         dividers of one row, since l is
+                                         per-row not per-k)
+  |A| fits 33 bits given the 3.7/3.6 bounds; the divider loads absA (33 bits,
+  sign recorded separately), then performs 33 shift-subtract restoring
+  iterations (bit 32 down to bit 0 of absA), each iteration: shift the next
+  absA bit into a 25-bit remainder register (giving a 26-bit trial value),
+  subtract B if the trial is >= B (restoring semantics), shift a 1 or 0 into
+  a 33-bit quotient shift register. After 33 iterations, qt (33-bit unsigned)
+  and rt (25-bit unsigned remainder, always < B) are exact. Sign correction
+  and floor conversion, then sat8, exactly per 3.8:
+    q = (A >= 0) ? qt : -(qt + (rt != 0))
+    out_raw = sat8(q)
+  Per-row divider timing: 1 load cycle + 33 iterate cycles + 1 write cycle
+  (writes all 16 out_raw values to the output buffer row) = 35 cycles/row,
+  4 rows sequential per group = 140 cycles/group. This is deliberately NOT
+  overlapped with the next group's compute (correctness first, per the
+  build brief); the next group's S_COMPUTE only starts after all 4 rows of
+  the current group finish dividing. Overlapping the divide phase with the
+  next group's block-0 compute (which has no drain dependency) is a valid
+  future optimization, not implemented here.
+
+n_len contract: the golden model (model/attn.py attn_fixed) accepts any
+1 <= N <= 256. This hardware module requires n_len a multiple of 4 in
+[4, 64] (4-row query groups and 4-row key/value blocks with no partial-tile
+handling); n_len is latched into nblk_reg = n_len[6:2] on the start edge and
+is not re-sampled until the next start.
+
+Ports:
+
+| Port        | Dir | Width | Meaning                                             |
+|-------------|-----|-------|------------------------------------------------------|
+| clk         | in  | 1     | clock                                                |
+| rst         | in  | 1     | synchronous, active-high                             |
+| sel         | in  | 2     | which RAM the load port writes: 0=Q, 1=K, 2=V, 3=unused (no write) |
+| addr        | in  | 10    | {row[5:0], col[3:0]}, load-port write address        |
+| wdata       | in  | 8     | ACT Q1.6, load-port write data                       |
+| we          | in  | 1     | load-port write enable                               |
+| n_len       | in  | 7     | sequence length; multiple of 4, 4 <= n_len <= 64      |
+| start       | in  | 1     | pulse; begins a run when busy = 0                    |
+| busy        | out | 1     | 1 while a run is in progress                          |
+| done        | out | 1     | one-cycle pulse the cycle the run returns to idle     |
+| rd_addr     | in  | 10    | output buffer read address, {row[5:0], col[3:0]}     |
+| rd_data     | out | 8     | ACT Q1.6, registered one cycle after rd_addr           |
+| cycle_count | out | 32    | cycles elapsed since the accepted start pulse          |
+
+Internal storage: q_mem, k_mem, v_mem (64 x 16 signed int8, one shared
+byte-granular synchronous write port muxed by sel), out_mem (64 x 16 signed
+int8, written 16-wide per divider-bank row completion, read through the
+registered rd_addr/rd_data port). These are plain register-array storage
+(not $readmemh, not a memory macro instantiation); reads for the tile and
+the drain path index whole rows combinationally.
+
+FSM states:
+
+| State        | What happens                                                            |
+|--------------|--------------------------------------------------------------------------|
+| S_IDLE        | busy = 0; on start, latch nblk_reg = n_len[6:2], zero rg/kb/t, go to S_COMPUTE |
+| S_COMPUTE     | 16 cycles (t = 0..15, d = t): matmul_tile streams block kb of the current row group (clr at t=0, en=1 throughout); if kb != 0, concurrently drains block kb-1 (round-robin as above). At t=15, drain_buf <= acc_flat (capture); if kb == nblk_reg-1 go to S_DRAIN_LAST else kb <= kb+1 and repeat |
+| S_DRAIN_LAST  | 16 more cycles, same round-robin drain, no tile compute: drains the final block (nblk_reg-1) that S_COMPUTE could not overlap. At t=15, go to S_DIVIDE, row <= 0, div_cnt <= 0 |
+| S_DIVIDE      | 35 cycles/row x 4 rows (div_cnt: 0=load, 1..33=iterate, 34=write-and-advance). After row 3's write: if rg == nblk_reg-1, go to S_IDLE with done = 1; else rg <= rg+1, kb <= 0, t <= 0, go to S_COMPUTE for the next row group |
+
+busy = (state != S_IDLE). done is a registered pulse, true only on the cycle
+the FSM lands back in S_IDLE from a run (so busy and done are never both 1,
+and done implies state == S_IDLE by construction). cycle_count resets to 1
+on the accepted start edge and increments every cycle while busy, holding at
+its final value once done (a benchmark readback of total run length).
+
+Cycle formula: for a run with nblk = n_len/4 row groups (= key/value blocks):
+  cycles/group = (nblk + 1) * 16 (compute+drain) + 4 * 35 (divide) = 16*nblk + 156
+  total        = nblk * (16*nblk + 156) + 1 (start edge)
+At n_len = 64 (nblk = 16): total = 16*(256 + 156) + 1 = 16*412 + 1 = 6593
+cycles. At n_len = 4 (nblk = 1): total = 1*(16+156)+1 = 173 cycles. These are
+the closed-form counts before any pipelining of the divide phase across
+group boundaries (documented above as future work); the smoke-sim
+cycle_count value is the authoritative check for the exact constant term.
+
+FORMAL block (control-only, per CLAUDE.md's formal-is-a-subset rule):
+reset state (S_IDLE, busy=0, done=0, cycle_count=0), busy/done mutual
+exclusion, done implies idle, cycle_count monotone non-decreasing while
+busy. None of these properties reference q_mem/k_mem/v_mem/out_mem, the
+NUM accumulators, the score/rescale arithmetic, or the divider bank: the
+control FSM's transition conditions depend only on counters (t, kb, rg,
+row, div_cnt) and start, never on datapath values, so this stays solver-
+cheap by construction even though the full netlist still elaborates the
+datapath as part of the design.
