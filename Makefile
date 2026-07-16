@@ -28,6 +28,14 @@ verify-fw verify: lint sim coverage synth-check formal
 	@echo "| verify-$(MODULE) | $(MODULE) passes lint/sim/cov/synth/formal | PASS | make verify MODULE=$(MODULE) | 0 |" >> EVIDENCE.md
 	@echo "VERIFY OK: $(MODULE)" | tee -a EVIDENCE.md
 
+# Phase 0: golden-model cross-check (attn.py vs attn.cpp bit-identical).
+# The EVIDENCE row is appended only if the check exits 0.
+model-check:
+	@mkdir -p build/model
+	python3 model/crosscheck.py
+	@echo "| model-crosscheck | attn.py and attn.cpp bit-identical on random + corner cases; exp LUT emitted; float gate met | PASS | make model-check | 0 |" >> EVIDENCE.md
+	@echo "VERIFY OK: attn_model" >> EVIDENCE.md
+
 audit-guide:
 	@test -f guide.md || (echo "no guide.md yet" && exit 1)
 	@if grep -niE 'taped out|on the (real )?board|runs on the fpga|measured on|soldered|powered on' guide.md \
