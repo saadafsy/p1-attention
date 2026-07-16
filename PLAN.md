@@ -12,7 +12,7 @@ exists, a Beta auditor countersigned, AND I passed "grill me". I write all rtl/ 
 ## Phase 1 — Core datapath RTL (I write; agent tutors + reviews)
 - [Ready] rtl/mac_unit.sv          (domain: sandbox)  verify green (lint/sim/100% line cov/synth/formal), EVIDENCE row; awaits auditor countersign + grill
 - [Ready] rtl/matmul_tile.sv       (domain: sandbox)  roster-built; verify green, both auditors countersigned; awaits grill
-- [Todo] rtl/online_softmax.sv     (domain: sandbox)  owner: ME
+- [Ready-pending-audit] rtl/online_softmax.sv  (domain: sandbox)  roster-built; verify green; auditors running
 - [Todo] tb/* self-checking vs golden model  (domain: sandbox)  owner: ME (agent may scaffold harness)
 
 ## Phase 2 — Integration + benchmark
