@@ -122,8 +122,8 @@ clamp (two 16-bit values can differ by up to 65535).
 
 The full table lives in model/exp_lut.hex (1024 lines, 4 lowercase hex digits
 per line, line j = lut[j]). It is generated only by model/attn.py; attn.cpp and
-the RTL ($readmemh) consume the same file, so there is exactly one table in the
-project. Duplicating 1024 values here would create a second source of truth;
+the RTL (via generated rtl/exp_lut.svh, see 8.2) consume the same table, so
+there is exactly one table in the project. Duplicating 1024 values here would create a second source of truth;
 instead the file is pinned by checksum:
 
   sha256(model/exp_lut.hex) = 541676bde3a2a703ec0e021960eed77a1806f6182cd4a8d48803e57302e84ba5
@@ -392,7 +392,7 @@ Build order: mac_unit -> matmul_tile -> online_softmax -> attention_top.
 | Module         | Function (formats from Section 2)                            |
 |----------------|--------------------------------------------------------------|
 | mac_unit       | ACT x ACT multiply, SACC accumulate, clr/en control          |
-| matmul_tile    | weight-stationary 4x4 grid of mac_unit, K-dim streamed       |
+| matmul_tile    | output-stationary 4x4 grid of mac_unit, normative spec in 8.1 |
 | online_softmax | per-row (m, l) state, LUT, rescale multiplier, emits w and r |
 | attention_top  | row streamer, NUM accumulators, final divider, tile control  |
 
@@ -400,6 +400,81 @@ The final divider implements the Section 3.8 algorithm exactly (unsigned
 restoring core with the negative-numerator floor correction, about 34 cycles
 serial); it is off the per-element critical loop because it runs once per
 output element after row accumulation completes.
+
+### 8.1 matmul_tile: 4x4 output-stationary score tile (NORMATIVE, Phase 1)
+
+Function: computes one 4x4 block of the score matrix S = Q.K^T. A grid of
+4 x 4 = 16 mac_unit instances; MAC (i, j) accumulates q_i[d] * k_j[d] over
+the streamed dimension d = 0..15 (D = 16, Section 1). Each enabled cycle the
+tile consumes one element from each of the 4 Q rows and each of the 4 K rows:
+the Q element of row i is broadcast across grid row i (all 4 columns), the K
+element of row j is broadcast down grid column j. After D enabled cycles
+every accumulator holds one exact SACC block element; the whole 4x4 block
+completes in the same D cycles as a single dot product.
+
+Dataflow decision: this is an OUTPUT-STATIONARY outer-product-accumulate
+array, not the TPU-style weight-stationary systolic array the build sheet's
+reference language mentions. The reasons, stated so the deviation is honest:
+
+- On the score path BOTH operands stream. Q and K are per-inference
+  activations; there is no long-lived weight matrix that is reused across
+  many inputs and therefore worth pinning inside the PEs. Weight-stationary
+  wins exactly when one matrix is resident and amortized (the TPU's weights);
+  that precondition does not exist here.
+- Output-stationary keeps the partial sums in each PE's accumulator, so
+  nothing moves between PEs: no systolic skew registers, no partial-sum
+  forwarding chain, no drain sequence. The result is read out in place.
+- The already-verified mac_unit clr/en contract implements the entire tile
+  with ZERO additional datapath: the tile is pure instantiation plus input
+  slicing. Any other dataflow would add unverified arithmetic or movement
+  logic for no benefit at this size.
+
+The weight-stationary tradeoff (pin one operand in the PEs, stream the
+other, pipeline partial sums through the array; amortizes weight loads when
+one matrix is reused across a batch) is documented here as an interview
+talking point. It is NOT implemented.
+
+Control: the tile is deliberately thin. It re-exports the mac_unit contract
+unchanged, with all 16 MACs sharing the same rst, clr, and en:
+
+| rst | clr | en | acc(i,j) next                                    |
+|-----|-----|----|--------------------------------------------------|
+| 1   | x   | x  | 0                                                |
+| 0   | 1   | 1  | q_i[d] * k_j[d]   (new tile, no dead cycle)      |
+| 0   | 1   | 0  | 0                                                |
+| 0   | 0   | 1  | acc(i,j) + q_i[d] * k_j[d]                       |
+| 0   | 0   | 0  | hold                                             |
+
+Ownership split (binding): the d-loop counter and all sequencing (when to
+assert en, when to pulse clr, when acc_flat is valid) belong to
+attention_top (Phase 2). The tile contains no counters, no FSM, and no state
+other than the 16 mac_unit accumulators.
+
+Ports. Flat packed vectors are used for tool portability across verilator,
+iverilog, yosys, sby, and cocotb (unpacked-array and array-of-struct ports
+are handled inconsistently across that set). Packing convention below.
+
+| Port     | Dir | Width | Meaning                                        |
+|----------|-----|-------|------------------------------------------------|
+| clk      | in  | 1     | clock                                          |
+| rst      | in  | 1     | synchronous, active-high                       |
+| en       | in  | 1     | accept one product per MAC this cycle          |
+| clr      | in  | 1     | start a new tile this cycle                    |
+| q_flat   | in  | 32    | 4 ACT (Q1.6) elements, one per Q row           |
+| k_flat   | in  | 32    | 4 ACT (Q1.6) elements, one per K row           |
+| acc_flat | out | 384   | 16 SACC (Q11.12, 24-bit) accumulators          |
+
+Packing convention (little-endian slicing, element 0 in the low bits):
+- q_flat[8*i +: 8]           = ACT element d of Q row i, i = 0..3
+- k_flat[8*j +: 8]           = ACT element d of K row j, j = 0..3
+- acc_flat[24*(4*i+j) +: 24] = SACC S block element (row i, col j),
+  row-major: element (0,0) is acc_flat[23:0], (0,1) is acc_flat[47:24],
+  (3,3) is acc_flat[383:360].
+
+Formats: unchanged from Sections 2 and 3. ACT (Q1.6) in, SACC (Q11.12) out.
+Accumulation is exact: no rounding and no saturation anywhere in the tile.
+The no-overflow bound is the mac_unit bound D <= 511 (Section 3.2); D = 16
+here, so overflow is impossible with large margin.
 
 Naming conventions (binding for all RTL):
 - snake_case for signals and modules; module name = file name.
@@ -409,9 +484,105 @@ Naming conventions (binding for all RTL):
 - Format-carrying buses are named with their format when ambiguous, e.g.
   s_q5_10, w_uq1_15.
 
+### 8.2 online_softmax: per-row (m, l) state machine (NORMATIVE, Phase 1)
+
+Function: the per-row online-softmax recurrence of Section 6 for the running
+max m (SCORE) and denominator l (DEN), EXCLUDING the NUM path and the final
+division (both belong to attention_top). Per consumed score s the module
+emits the weight w and rescale factor r (both WGT) that attention_top applies
+to its NUM accumulators, plus the current l. Implemented equations, exactly
+Section 6 with rounding sites 2 and 3:
+
+  m_new = max(m, s)
+  r     = lut[ idx(m - m_new) ]
+  w     = lut[ idx(s - m_new) ]
+  l     <= rshr(l * r, 15) + w
+  m     <= m_new
+
+idx() is the clamp-and-round of 3.5: the differences m - m_new and s - m_new
+are computed in 17 bits before the clamp (two 16-bit SCOREs can differ by up
+to 65535), clamped to -16384 (-16.0 in Q5.10), then
+idx = min((-d_c + 8) >> 4, 1023). rshr is the round-half-up of Section 4.
+The l * r intermediate is the 40-bit (24u x 16u) product of Section 2, never
+registered. This module contains NO saturation (score saturation is upstream
+in the score-scale stage; DEN has no saturation by the 3.6 bound); the two
+functional clamps of Section 5 (diff clamp, LUT index clamp) both live here.
+
+Ports (formats from Section 2):
+
+| Port      | Dir | Width | Format       | Meaning                            |
+|-----------|-----|-------|--------------|------------------------------------|
+| clk       | in  | 1     |              | clock                              |
+| rst       | in  | 1     |              | synchronous, active-high           |
+| in_valid  | in  | 1     |              | accept score s this cycle          |
+| row_start | in  | 1     |              | asserted WITH in_valid on a row's first element: state bases at m = -32768, l = 0 before consuming this s (Section 6 init). Ignored when in_valid = 0. |
+| s         | in  | 16    | SCORE Q5.10 signed | score element                |
+| w         | out | 16    | WGT UQ1.15   | lut[idx(s - m_new)], registered    |
+| r         | out | 16    | WGT UQ1.15   | lut[idx(m - m_new)], registered    |
+| out_valid | out | 1     |              | w and r are valid; high exactly one cycle after each accepted s |
+| l         | out | 24    | DEN UQ9.15   | current denominator register, continuously visible |
+| m         | out | 16    | SCORE Q5.10 signed | current running max, continuously visible (debug and formal) |
+
+Timing: single-cycle recurrence, throughput one element per cycle, no
+backpressure (the module always accepts when in_valid is high). The (m, l)
+state updates on the clock edge that consumes s; w, r, out_valid are
+registered on the SAME edge. Consequence: during an out_valid cycle the
+visible l already includes the element that (w, r) describe, and
+attention_top applies acc <= rshr(acc * r, 15) + w * v in that same
+out_valid cycle, so the same r that rescaled l rescales the NUM accumulators
+one cycle later, keeping both states element-consistent. Rows may be issued
+back to back: row_start with in_valid may follow the previous row's last
+element with no dead cycle (the previous element's out_valid overlaps the
+new row's first accepted cycle; attention_top's own sequencing tells them
+apart).
+
+Cycle diagram, one 3-element row (registered state shown as visible DURING
+each cycle; mj = running max after elements 0..j, lj = l after elements 0..j):
+
+  cycle       |  0   |  1     |  2     |  3     |  4
+  in_valid    |  1   |  1     |  1     |  0     |  0
+  row_start   |  1   |  0     |  0     |  0     |  0
+  s           |  s0  |  s1    |  s2    |  x     |  x
+  m (visible) |  old |  s0    |  m1    |  m2    |  m2
+  l (visible) |  old |  l0    |  l1    |  l2    |  l2
+  out_valid   |  0   |  1     |  1     |  1     |  0
+  w (visible) |  x   |  w(s0) |  w(s1) |  w(s2) |  w(s2)
+  r (visible) |  x   |  r(s0) |  r(s1) |  r(s2) |  r(s2)
+
+At cycle 0 the module ignores the stale (m, l) via row_start and bases the
+step at (m = -32768, l = 0); by Section 6 identity 2 the cycle-1 visible
+state is exactly (m = s0, l = 32768) with w = 0x8000 and r = 0.
+
+exp LUT realization: a COMBINATIONAL ROM inside the module, defined by the
+generated include rtl/exp_lut.svh (a synthesizable constant case function,
+exp_lut_rom, 1024 x 16 bit). It is emitted ONLY by
+'python3 model/attn.py --emit-lut-svh rtl/exp_lut.svh', is never hand-edited,
+and must match model/exp_lut.hex entry for entry (the testbench re-checks all
+1024 entries against the hex). This keeps 3.5's single generation source:
+model/exp_lut.hex remains the normative interchange artifact (sha256-pinned
+in 3.5) consumed by attn.cpp; the .svh is the same table rendered
+synthesizable, avoiding a $readmemh initial block (banned by the RTL coding
+standard) and memory-file path resolution differences across the
+verilator/yosys/sby working directories. The w and r lookups are two
+combinational reads of the same constant table (two ROM muxes after
+synthesis; 2 KB scale, no memory macro implied). The RTL `include path is
+"rtl/exp_lut.svh", resolved relative to the repo root for make lint and
+synth-check; flows that run tools from another working directory must map it
+(cocotb: an include dir pointing at the repo root; sby: a [files] line with
+destination path rtl/exp_lut.svh).
+
+Pipelining hook (Phase 4): the single-cycle combinational path
+diff -> clamp -> index -> ROM -> (l * r multiply) -> rshr -> add is the
+expected critical path of the whole design. The planned Phase 4 iteration is
+a registered-ROM variant (register w and r out of the lookup, moving the
+multiply/accumulate to the next stage); the recurrence arithmetic is
+unchanged, only latency and the out_valid alignment shift. Any such change
+updates this section first.
+
 Golden model files:
 - model/attn.py: normative executable spec (pure-integer core, emits
-  model/exp_lut.hex, NumPy float reference for the error budget).
+  model/exp_lut.hex and the generated rtl/exp_lut.svh rendering of it,
+  NumPy float reference for the error budget).
 - model/attn.cpp: independent reimplementation, required bit-identical;
   consumes the same exp_lut.hex.
 - model/crosscheck.py: generates random and corner cases, proves the two

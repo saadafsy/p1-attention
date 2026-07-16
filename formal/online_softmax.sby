@@ -1,0 +1,41 @@
+# online_softmax formal: BMC over the module's own `ifdef FORMAL block
+# (rtl/online_softmax.sv, docs/uarch.md 8.2). Scope is deliberately narrow
+# per CLAUDE.md ("formal is a subset / do not fight the tool"): the
+# transition relation still contains the 1024-entry ROM function and the
+# 24u x 16u multiply (both are part of the combinational next-state logic
+# feeding the asserted registers), so the solver reasons about them even
+# though no property directly asserts ROM contents or product values. What
+# IS proven here, every BMC step up to depth 20:
+#   - idx() clamp facts: diff_m, diff_s <= 0; pre-clamp and final LUT
+#     indices stay in their declared ranges (combinational, docs 3.5/5).
+#   - reset state: m == -32768, l == 0, out_valid == 0.
+#   - hold (in_valid low the prior cycle): (m, l, w, r) unchanged,
+#     out_valid low (no stale valid pulse).
+#   - accepted element: out_valid rises exactly one cycle later; on a
+#     row_start step m becomes exactly the incoming s (identity 2, uarch
+#     6.1); otherwise m is monotonic non-decreasing within a row (the
+#     running-max-monotonic invariant).
+# Rich behavioral checks (LUT entry-for-entry equivalence, full recurrence
+# vs the model/attn.py mirror, DEN accumulator overflow bound over long
+# random rows) are cocotb's job (tb/online_softmax/test_online_softmax.py),
+# not formal's: an open bmc flow proving a 40-bit multiply/1024-way ROM
+# functionally correct is exactly the kind of proof this toolchain cannot
+# do in reasonable time, so those checks are deliberately NOT attempted
+# here (CLAUDE.md formal-limit note).
+#
+# Depth settled at 20 (same as mac_unit.sby): passes in a few seconds with
+# z3, well inside the ~3 minute budget, so no need to step down to 10/5.
+[options]
+mode bmc
+depth 20
+
+[engines]
+smtbmc z3
+
+[script]
+read_verilog -sv -formal -DFORMAL online_softmax.sv
+prep -top online_softmax
+
+[files]
+rtl/online_softmax.sv
+rtl/exp_lut.svh rtl/exp_lut.svh
