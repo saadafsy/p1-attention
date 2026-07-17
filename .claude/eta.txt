@@ -1,1 +1,1 @@
-now: Phase 4 next (softmax pipelining + STA) | attention_top closed 14/17
+now: phases 0-5 closed; FPGA bringup kit in build; next: guide push + Mode-B grill
