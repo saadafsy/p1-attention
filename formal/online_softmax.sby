@@ -1,20 +1,27 @@
 # online_softmax formal: BMC over the module's own `ifdef FORMAL block
-# (rtl/online_softmax.sv, docs/uarch.md 8.2). Scope is deliberately narrow
-# per CLAUDE.md ("formal is a subset / do not fight the tool"): the
+# (rtl/online_softmax.sv, docs/uarch.md 8.2 and 8.2.1). Scope is deliberately
+# narrow per CLAUDE.md ("formal is a subset / do not fight the tool"): the
 # transition relation still contains the 1024-entry ROM function and the
 # 24u x 16u multiply (both are part of the combinational next-state logic
 # feeding the asserted registers), so the solver reasons about them even
-# though no property directly asserts ROM contents or product values. What
-# IS proven here, every BMC step up to depth 20:
-#   - idx() clamp facts: diff_m, diff_s <= 0; pre-clamp and final LUT
-#     indices stay in their declared ranges (combinational, docs 3.5/5).
-#   - reset state: m == -32768, l == 0, out_valid == 0.
-#   - hold (in_valid low the prior cycle): (m, l, w, r) unchanged,
-#     out_valid low (no stale valid pulse).
-#   - accepted element: out_valid rises exactly one cycle later; on a
-#     row_start step m becomes exactly the incoming s (identity 2, uarch
-#     6.1); otherwise m is monotonic non-decreasing within a row (the
-#     running-max-monotonic invariant).
+# though no property directly asserts ROM contents or product values.
+#
+# Two tasks, one per PIPE_ROM elaboration (uarch.md 8.2.1):
+#   p0: default PIPE_ROM=0, the audited latency-1 property list, unchanged:
+#     - idx() clamp facts: diff_m, diff_s <= 0; pre-clamp and final LUT
+#       indices stay in their declared ranges (combinational, docs 3.5/5).
+#     - reset state: m == -32768, l == 0, out_valid == 0.
+#     - hold (in_valid low the prior cycle): (m, l, w, r) unchanged,
+#       out_valid low (no stale valid pulse).
+#     - accepted element: out_valid rises exactly one cycle later; on a
+#       row_start step m becomes exactly the incoming s (identity 2, uarch
+#       6.1); otherwise m equals the exact max recurrence (which subsumes
+#       the retained monotonicity assert).
+#   p1: PIPE_ROM=1 via chparam on the deferred module: same clamp facts and
+#     reset state, the same latency-1 exact-max m recurrence (m does not
+#     move in this variant), plus latency-2 alignment over two reset-free
+#     history cycles: out_valid == in_valid two cycles earlier, and l, w, r
+#     hold when no element was accepted two cycles earlier.
 # Rich behavioral checks (LUT entry-for-entry equivalence, full recurrence
 # vs the model/attn.py mirror, DEN accumulator overflow bound over long
 # random rows) are cocotb's job (tb/online_softmax/test_online_softmax.py),
@@ -25,6 +32,10 @@
 #
 # Depth settled at 20 (same as mac_unit.sby): passes in a few seconds with
 # z3, well inside the ~3 minute budget, so no need to step down to 10/5.
+[tasks]
+p0
+p1
+
 [options]
 mode bmc
 depth 20
@@ -33,7 +44,9 @@ depth 20
 smtbmc z3
 
 [script]
-read_verilog -sv -formal -DFORMAL online_softmax.sv
+p0: read_verilog -sv -formal -DFORMAL online_softmax.sv
+p1: read_verilog -sv -formal -DFORMAL -defer online_softmax.sv
+p1: chparam -set PIPE_ROM 1 online_softmax
 prep -top online_softmax
 
 [files]

@@ -4,6 +4,11 @@ SEED   ?= 1
 # designs (matmul_tile instantiates mac_unit) elaborate correctly.
 SRC    := $(wildcard rtl/*.sv)
 
+# Every target here is a command, not a file. Without this, the formal/
+# directory shadows the formal target (make says "up to date" and silently
+# skips sby inside make verify). Found 2026-07-16 during Phase 4.
+.PHONY: lint sim coverage synth-check formal verify verify-fw synth-netlist sta model-check audit-guide
+
 lint:
 	verilator --lint-only -Wall -sv --top-module $(MODULE) $(SRC)
 	verible-verilog-lint $(SRC)

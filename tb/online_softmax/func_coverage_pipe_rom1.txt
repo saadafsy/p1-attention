@@ -1,0 +1,11 @@
+online_softmax PIPE_ROM=1 functional coverage report
+seed: 871086569718701522773661903018331822315715890145
+
+    HIT  back_to_back_across_stage_boundary                      hits=1
+    HIT  bubble_immediately_after_row_start_lat2                 hits=1
+    HIT  reset_mid_pipe_elements_in_flight                       hits=1
+    HIT  drain_falls_exactly_2_cycles_after_last_in_valid        hits=1
+    HIT  m_leads_out_valid_by_one_on_max_update                  hits=1
+    HIT  den_worst_case_lat2_l_eq_2p23                           hits=1
+
+TOTAL: 6/6 bins hit (100.0%)

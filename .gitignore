@@ -1,6 +1,8 @@
 # Generated simulation/build artifacts (not evidence; EVIDENCE.md is tracked)
 tb/*/sim_build/
+tb/*/sim_build_pipe_rom1/
 tb/*/results.xml
+tb/*/results_pipe_rom1.xml
 tb/*/dump.vcd
 build/
 __pycache__/
@@ -9,3 +11,4 @@ __pycache__/
 formal/*/
 obj_dir/
 .claude/settings.local.json
+.history_sta
