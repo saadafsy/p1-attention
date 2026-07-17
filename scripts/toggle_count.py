@@ -19,10 +19,13 @@ import sys
 
 
 def parse_vcd(path):
+    # No special handling is needed for the $dumpvars initial-value section:
+    # a net's FIRST value line only seeds last[code] (old is None, nothing
+    # counted), so the baseline is established for free and only genuine
+    # 0<->1 changes afterwards count as toggles.
     ids = {}       # id code -> bit width
     last = {}      # id code -> last value string
     toggles = {}   # id code -> toggle count
-    in_dumpsec = False
     with open(path) as f:
         for line in f:
             line = line.strip()
@@ -35,7 +38,6 @@ def parse_vcd(path):
                 ids[code] = width
                 toggles.setdefault(code, 0)
             elif line.startswith("$"):
-                in_dumpsec = line.startswith(("$dumpvars", "$dumpon"))
                 continue
             elif line[0] == "#":
                 continue

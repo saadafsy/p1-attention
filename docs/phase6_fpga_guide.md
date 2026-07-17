@@ -335,9 +335,9 @@ never needs to guess timing: run completion is observed by polling STATUS.
 | Cmd byte | Name | Host sends after cmd | FPGA responds | Effect |
 |----------|------|----------------------|---------------|--------|
 | 0x50 'P' | PING | nothing | 0xA5 | link test, no state change |
-| 0x51 'Q' | LOAD_Q | [row][16 data bytes] | 0x51 (after byte 16) | writes Q row, cols 0..15 |
-| 0x4B 'K' | LOAD_K | [row][16 data bytes] | 0x4B (after byte 16) | writes K row, cols 0..15 |
-| 0x56 'V' | LOAD_V | [row][16 data bytes] | 0x56 (after byte 16) | writes V row, cols 0..15 |
+| 0x51 'Q' | LOAD_Q | [row][16 data bytes] | 0x51 (after byte 16); 0x3F immediately if busy | writes Q row, cols 0..15; if busy at the command byte, NAK and NO further bytes are consumed (FSM stays in command state) |
+| 0x4B 'K' | LOAD_K | [row][16 data bytes] | 0x4B (after byte 16); 0x3F immediately if busy | writes K row, cols 0..15; if busy at the command byte, NAK and NO further bytes are consumed (FSM stays in command state) |
+| 0x56 'V' | LOAD_V | [row][16 data bytes] | 0x56 (after byte 16); 0x3F immediately if busy | writes V row, cols 0..15; if busy at the command byte, NAK and NO further bytes are consumed (FSM stays in command state) |
 | 0x4E 'N' | SET_NLEN | [n_len byte] | 0x4E | stores n_len[6:0]; must be a multiple of 4 in [4, 64] |
 | 0x52 'R' | RUN | nothing | 0x52 if started, 0x3F if busy | pulses attention_top start; clears the done latch |
 | 0x53 'S' | STATUS | nothing | 1 status byte | see status table below |
@@ -358,12 +358,19 @@ Error behavior, all of it:
   command, so it can never be mistaken for an echo.
 - RUN while busy: NAK 0x3F and the start pulse is NOT issued (attention_top
   only accepts start when idle; the FSM checks busy first).
-- LOAD_Q/K/V while busy: NOT gated. The load port writes straight into the
-  Q/K/V RAM regardless of attn_busy, so loading while a run is in progress
-  silently corrupts that run's inputs (uarch.md 8.3's load-before-use
-  protocol assumes otherwise). The host MUST poll STATUS and confirm busy=0
-  before issuing any LOAD_Q/K/V; fpga/host/attn_host.py never loads while a
-  run is outstanding, for exactly this reason.
+- LOAD_Q/K/V while busy: NAK 0x3F at the command byte and the FSM stays in
+  the command state, consuming no row byte and no payload. This closes the
+  hazard where a mid-run load would strobe straight into the Q/K/V RAM and
+  silently corrupt the in-flight computation (uarch.md 8.3's load-before-use
+  protocol assumes loads happen only when idle). The host must STILL poll
+  STATUS and confirm busy=0 before issuing any LOAD_Q/K/V: a host that
+  ignores the NAK and sends the 17 payload bytes anyway will have each of
+  those bytes interpreted as a new command, a self-inflicted desync that the
+  resync procedure (below) recovers from. fpga/host/attn_host.py never loads
+  while a run is outstanding, for exactly this reason.
+- SET_NLEN deliberately remains accepted while busy: it is harmless, because
+  attention_top latched nblk_reg from n_len at the start pulse, so changing
+  the stored value mid-run cannot affect the run in flight.
 - SET_NLEN does not validate: the stored value feeds attention_top's n_len
   input directly and is sampled by the core only at the start pulse. Sending
   a value that is not a multiple of 4 in [4, 64] violates the 8.3 contract
@@ -456,14 +463,16 @@ with a $_DLATCH_ grep; verible-verilog-lint on fpga/.
 
 Also checked now, in simulation (fixed seed, COCOTB_RANDOM_SEED=1 and 7,
 exit 0 both): cocotb testbenches exist for BOTH fpga/ tops.
-tb/fpga_uart (attn_uart_top around the full, unmodified attention_top; 8
+tb/fpga_uart (attn_uart_top around the full, unmodified attention_top; 9
 tests, ClksPerBit=16 sim-speed override, see that Makefile) covers PING,
 LOAD_Q/K/V, SET_NLEN, RUN, STATUS, READ_OUT, and READ_CYCLES bit-exactly
 against model/attn.py attn_fixed; NAK-on-unknown-command; NAK-on-RUN-while-
-busy; UART framing-error resilience including the spurious-NAK-on-break
-case (6.3.4); resync after a deliberately abandoned frame (6.3.4); and
-reset recovery both mid-run and literally mid-UART-byte. A set-based check
-fails the run if any protocol command class was never exercised.
+busy; NAK-on-LOAD-while-busy (rejected at the command byte, FSM proven
+still in the command state, in-flight run proven uncorrupted); UART
+framing-error resilience including the spurious-NAK-on-break case (6.3.4);
+resync after a deliberately abandoned frame (6.3.4); and reset recovery
+both mid-run and literally mid-UART-byte. A set-based check over 13 command
+classes fails the run if any protocol command class was never exercised.
 tb/fpga_tile (tile_runner) has 1 directed test: acc_flat checked against
 both the documented 6.3.5 table and an independent dot-product computation.
 fpga/host/attn_host.py's own encode/decode logic (including the resync and
