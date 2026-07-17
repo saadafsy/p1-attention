@@ -16,7 +16,7 @@ exists, a Beta auditor countersigned, AND I passed "grill me". I write all rtl/ 
 - [Todo] tb/* self-checking vs golden model  (domain: sandbox)  owner: ME (agent may scaffold harness)
 
 ## Phase 2 — Integration + benchmark
-- [Building] rtl/attention_top.sv  (domain: sandbox)  verify green (VERIFY OK row); BRAM memory conversion in flight; dual audit held until conversion lands, then [Ready]
+- [Ready] rtl/attention_top.sv     (domain: sandbox)  roster-built; verify green incl. BRAM-pattern memories, both auditors countersigned; awaits grill
 - [Ready] benchmark vs CPU golden  (domain: sandbox)  docs/benchmark.md + tb/attention_top/cycles.txt + build/cpu_baseline.txt
 
 ## Phase 3 — Verification (cocotb + coverage + SVA)
