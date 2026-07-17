@@ -1,1 +1,1 @@
-now: attention_top BRAM conversion + dual audit | then P4 pipelining, P5 power proxy
+now: Phase 4 next (softmax pipelining + STA) | attention_top closed 14/17
