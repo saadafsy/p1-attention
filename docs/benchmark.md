@@ -11,20 +11,23 @@ Sources (both machine-generated, reproducible):
   GOLDEN MODEL, not a tuned BLAS kernel; the comparison is honest about that.
 
 Clock disclaimer: cycle counts are clock-independent simulation facts. The
-times below are ILLUSTRATIVE at two clocks: 44 MHz is the current
-softmax-limited sky130 tt baseline from the Phase 4 infrastructure smoke run
-(build/sta_online_softmax.log, slack -12.882 at 10 ns, path ~22.9 ns); 100
-MHz is the post-pipelining target that the docs/uarch.md 8.2 registered-ROM
-hook aims at and the Basys 3 clock for Phase 6. Neither is a signed-off Fmax;
-Phase 4 produces that.
+times below are ILLUSTRATIVE at the two Phase 4 signed clocks for the
+online_softmax block, the design's expected Fmax limiter
+([EVIDENCE: phase4-sta], docs/tradeoffs.md): 38.5 MHz is the met period of
+the default comb-ROM config (26 ns, sky130 tt), 76.9 MHz the met period of
+the PIPE_ROM=1 registered-ROM variant (13 ns). Both are block-level OpenSTA
+tool estimates; attention_top itself instantiates the default config and its
+integrated netlist has not been through STA, so neither column is a signed
+Fmax for the top. Earlier revisions of this file quoted 44 MHz from a
+pre-Phase-4 smoke run of the same log; superseded.
 
-| N  | cycles | @44 MHz | @100 MHz | CPU compute-only | speedup @44 | @100 |
-|----|--------|---------|----------|------------------|-------------|------|
-| 4  | 173    | 3.9 us  | 1.7 us   | ~0 (below floor resolution) | n/a | n/a |
-| 8  | 377    | 8.6 us  | 3.8 us   | ~0 (below floor resolution) | n/a | n/a |
-| 16 | 881    | 20.0 us | 8.8 us   | 82 us            | 4.1x        | 9.3x |
-| 32 | 2273   | 51.7 us | 22.7 us  | 140 us           | 2.7x        | 6.2x |
-| 64 | 6593   | 149.8 us| 65.9 us  | 275 us           | 1.8x        | 4.2x |
+| N  | cycles | @38.5 MHz | @76.9 MHz | CPU compute-only | speedup @38.5 | @76.9 |
+|----|--------|-----------|-----------|------------------|---------------|-------|
+| 4  | 173    | 4.5 us    | 2.2 us    | ~0 (below floor resolution) | n/a | n/a |
+| 8  | 377    | 9.8 us    | 4.9 us    | ~0 (below floor resolution) | n/a | n/a |
+| 16 | 881    | 22.9 us   | 11.5 us   | 82 us            | 3.6x          | 7.1x  |
+| 32 | 2273   | 59.0 us   | 29.6 us   | 140 us           | 2.4x          | 4.7x  |
+| 64 | 6593   | 171.2 us  | 85.7 us   | 275 us           | 1.6x          | 3.2x  |
 
 (CPU compute-only = median minus the 1.154 ms process floor; at N = 4 and 8
 the subtraction is inside measurement noise and no speedup is claimed.)
