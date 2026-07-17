@@ -28,3 +28,6 @@ VERIFY OK: online_softmax
 | audit-online_softmax-formal-coverage | formal-coverage-auditor independent re-run: cocotb 7/7 on two seeds, coverage 99.9% (sole miss = unreachable generated default arm, verified), sby depth20 PASS non-vacuous; alignment and rescale-identity checks audited | PASS | agent re-ran make sim (SEED=1,7) + check_coverage + sby + SMT2 inspection, 2026-07-16 | 0 |
 | verify-attention_top | attention_top passes lint/sim/cov/synth/formal | PASS | make verify MODULE=attention_top | 0 |
 VERIFY OK: attention_top
+| verify-attention_top | attention_top passes lint/sim/cov/synth/formal | PASS | make verify MODULE=attention_top | 0 |
+VERIFY OK: attention_top
+| bram-conversion-attention_top | q/k/v/out memories rewritten BRAM-inferable: coarse-stage $mem_v2 cells 0 -> 4 (2x 256x32, 2x 64x128); generic-synth DFF 37380 -> 37548 (generic mapping flattens RAM to FF either way; the 4 mem cells are the inference-ready signal); yosys synth 5m23s/4.77GB -> 1m15s/1.25GB; sby 60s -> 2.8s; bit-identical (6/6 tests x3 seeds, cycles.txt unchanged, VE-confirmed) | PASS | designer report + VE confirmation 2026-07-16, make verify re-run exit 0 | 0 |

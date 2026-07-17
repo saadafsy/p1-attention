@@ -726,12 +726,79 @@ Ports:
 | rd_data     | out | 8     | ACT Q1.6, registered one cycle after rd_addr           |
 | cycle_count | out | 32    | cycles elapsed since the accepted start pulse          |
 
-Internal storage: q_mem, k_mem, v_mem (64 x 16 signed int8, one shared
-byte-granular synchronous write port muxed by sel), out_mem (64 x 16 signed
-int8, written 16-wide per divider-bank row completion, read through the
-registered rd_addr/rd_data port). These are plain register-array storage
-(not $readmemh, not a memory macro instantiation); reads for the tile and
-the drain path index whole rows combinationally.
+Internal storage (Block-RAM-inferable, revised from the original register-array
+version): four synchronous memories, each with exactly ONE write port and ONE
+synchronous read port (`always_ff`, indexed by a runtime address, no per-
+element unrolled write logic) -- the canonical single-port RAM-inference
+idiom yosys keeps as a `$mem_v2` cell (and that Vivado/other BRAM-aware
+flows map onto a real Block RAM), instead of the original `logic [7:0]
+q_mem[64][16]` etc. register arrays whose 1024-way per-element `genvar`
+write loop synthesized to roughly 32k individual flip-flops plus a large
+combinational address-decode/mux structure for the tile's multi-row reads
+(measured: yosys `hierarchy;proc;opt;memory -nomap;stat` on the register-
+array version shows ZERO `$mem_v2` cells owned by attention_top -- the
+arrays never form a recognizable memory object at all, confirmed by the
+per-bit register names yosys assigns, e.g. `q_mem[1023]`; full `synth`
+takes 5m23s wall / 4.77 GB peak on that version, driven by ~72k `$eq`
+cells from the multi-address combinational reads, versus 1m15s wall / 1.25
+GB peak on the revised version below; `sby` BMC depth 10 drops from the
+~1 minute the original attention_top.sby documented to 2.8s).
+
+- q_mem, k_mem: COLUMN-MAJOR, word-packed 4 ACT bytes/word (`q_word_mem`,
+  `k_word_mem`, each `logic [31:0] mem [256]`, word address = {group[3:0],
+  col[3:0]} where group is rg for Q, kb for K). One word IS q_flat/k_flat
+  (8.1's own little-endian lane packing: lane i in bits [8*i+:8]), so a
+  SINGLE synchronous read per cycle delivers the tile feed directly with
+  no combinational multi-row decode. This is the geometry change flagged
+  in the tradeoff: the byte-granular load-port write (row, col) is split
+  into word address {row[5:2], col[3:0]} and byte lane row[1:0] (the row's
+  position within its group of 4), a one-of-4-byte-lane write into an
+  otherwise-unread word, synthesizable as the standard partial-word BRAM
+  write. The read address is PREFETCHED one cycle early: rg_n/kb_n/t_n
+  (the FSM's own next-state value for rg/kb/t, computed combinationally,
+  the same case structure as the sequential update) drive the read port
+  this cycle, so the RAM's registered output lands, next cycle, exactly
+  the value a combinational read of the CURRENT (rg, kb, t) used to give.
+  Zero added latency; the cycle_count formula (below) is unchanged and was
+  re-verified bit-exactly by the existing testbench after this change.
+- v_mem: ROW-MAJOR, 16 ACT bytes/word (`logic [127:0] v_mem [64]`, one V
+  row = one word), matching the drain path's whole-row access pattern.
+  Byte-granular writes use the natural row/col split (word = row, byte
+  lane = col). The read address is drain_v_row, the SAME combinational
+  signal that drives online_softmax's in_valid this cycle; the RAM's own
+  1-cycle synchronous-read latency lands the row on the out_valid cycle
+  one cycle later (online_softmax's fixed in_valid -> out_valid latency,
+  8.2), which is exactly the alignment a separate per-lane vrow_pipe
+  address register used to provide by hand in the register-array version.
+  Because round-robin draining guarantees at most one lane's out_valid is
+  high on any cycle (lane = t[1:0] is single-valued each cycle, and
+  out_valid is one cycle behind in_valid), one shared read port correctly
+  serves whichever lane is active, with no address pipeline register at
+  all.
+- out_mem: ROW-MAJOR, 16 ACT bytes/word (`logic [127:0] out_mem [64]`),
+  written WHOLE (all 16 bytes, one word) on out_we by the divider bank
+  (no byte lanes needed on this port), and read back byte-granular through
+  the registered rd_addr/rd_data port (`rd_data <= out_mem[row][8*col+:8]`,
+  a single always_ff, valid one cycle after rd_addr, unchanged in
+  observable timing from the original).
+
+Confirmed geometry (yosys `memory -nomap`, attention_top-level `$mem_v2`
+cells, all WR_PORTS=1 RD_PORTS=1): q_word_mem SIZE=256 WIDTH=32,
+k_word_mem SIZE=256 WIDTH=32, v_mem SIZE=64 WIDTH=128, out_mem SIZE=64
+WIDTH=128 (8192 bits each, matching the packing above exactly).
+
+None of the four RAM arrays carry a reset term: an `if (rst)` branch that
+touches RAM contents is exactly what blocks single-port BRAM inference (it
+forces per-bit set/reset logic into every cell). Correctness without a
+contents reset relies entirely on the load-before-use protocol already
+required by this module's contract: the FSM only ever indexes rows
+0..n_len-1 (rg, kb range over nblk = n_len/4 groups/blocks, never beyond),
+and every testbench (tb/attention_top/test_attention_top.py) writes the
+full n_len x D matrices before pulsing start, so no read ever reaches an
+un-written location. Only ordinary CONTROL/pipeline registers derived from
+RAM reads (q_flat, k_flat, v_row_reg, rd_data) carry the usual synchronous
+reset, per CLAUDE.md's "reset every sequential element" rule; this does not
+reintroduce a reset on the RAM arrays themselves.
 
 FSM states:
 
