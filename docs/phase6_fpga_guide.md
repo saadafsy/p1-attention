@@ -119,6 +119,12 @@ set_property IOSTANDARD LVCMOS33 [get_ports led0]
 ## configuration voltage (Vivado warns without these)
 set_property CFGBVS VCCO [current_design]
 set_property CONFIG_VOLTAGE 3.3 [current_design]
+
+## async inputs: both are 2-FF synchronized inside fpga/attn_uart_top.sv
+## (sync2ff), so exempt them from timing analysis or the report carries
+## meaningless input-path noise
+set_false_path -from [get_ports rst_btn]
+set_false_path -from [get_ports uart_rx]
 ```
 
 Two Quartus-user traps:
@@ -127,6 +133,11 @@ Two Quartus-user traps:
 - The button is mechanical: synchronize it into the clock domain (two FFs)
   and treat the synchronized signal as your rst. Our RTL uses synchronous
   active-high reset, so a pressed button = rst high is the right polarity.
+  Note the 2-FF synchronizer (fpga/sync2ff.sv) resolves metastability only,
+  not contact bounce; a bouncing reset just resets repeatedly, which is
+  idempotent and harmless here, so no debouncer is shipped. If you ever
+  reuse the button as a COMMAND input (single-step, trigger), add a
+  debouncer first or one press will fire many times.
 
 ## 6. Getting Q/K/V in and results out
 
@@ -149,6 +160,9 @@ to pins. Two workable paths, in recommended order:
 - This proves: clocking, reset, the datapath computing on real silicon
   (FPGA fabric), and your ability to observe it. That is the whole point of
   Phase 6.
+- The "tiny FSM that plays 16 elements from a constant array" is shipped as
+  fpga/tile_runner.sv (section 6.3.5): VIO only needs to drive go and clr,
+  ILA only needs to probe done and acc_flat.
 
 ### 6.2 Real demo: UART loader (the portable story)
 
@@ -163,6 +177,307 @@ ports): 115200 baud 8N1.
   script IS your self-checking hardware test.
 - attention_top's memory-load write port (sel/addr/data/we) was designed for
   exactly this kind of byte-serial front end.
+
+This sketch is now implemented as fpga/attn_uart_top.sv (around attention_top,
+not just the tile). Section 6.3.4 is the normative byte protocol; the host
+script must follow it exactly.
+
+### 6.3 The shipped bring-up RTL (fpga/)
+
+STATUS: the files below exist in the repo and pass verilator -Wall lint and
+yosys generic elaboration (latch-free) at the time of writing. Nothing in
+fpga/ has been synthesized in Vivado, simulated as a full system testbench,
+or run on a board. Every on-hardware behavior described here stays
+PENDING-HARDWARE per section 10. The core verify flow (Makefile
+SRC := rtl/*.sv) never sees fpga/: these files live outside the
+countersigned rtl/ tree and instantiate it unmodified.
+
+Vendor neutrality: no Xilinx primitives and no IP instantiations. VIO, ILA
+and any MMCM remain Vivado-side steps (sections 6.1 and 7). Everything in
+fpga/ is plain synthesizable SystemVerilog under the project RTL standard:
+synchronous active-high reset, no inferred latches (every always_comb has
+defaults or full assignment), no initial blocks. One documented exemption to
+"reset every sequential element": the 2-FF synchronizer instance that
+produces rst itself cannot be reset by its own output; that one instance
+ties rst to 1'b0 and settles to the true button value within 2 clk cycles
+of configuration. The sync2ff flops carry an (* ASYNC_REG = "TRUE" *)
+attribute (an attribute, not a primitive: generic tools ignore it, Vivado
+uses it to keep the two flops adjacent).
+
+#### 6.3.1 Files and module hierarchy
+
+| File | Module | Purpose |
+|------|--------|---------|
+| fpga/sync2ff.sv | sync2ff | parameterized 2-FF synchronizer (button, RX line) |
+| fpga/heartbeat.sv | heartbeat | LED divider, ~1 Hz blink at 100 MHz |
+| fpga/uart_rx.sv | uart_rx | 8N1 receiver, majority-of-3 mid-bit vote |
+| fpga/uart_tx.sv | uart_tx | 8N1 transmitter, valid/ready interface |
+| fpga/attn_uart_top.sv | attn_uart_top | section 6.2 demo top: UART protocol FSM around attention_top |
+| fpga/tile_runner.sv | tile_runner | section 6.1 first-bring-up top: constant playback into matmul_tile |
+
+Two alternative tops (set exactly one as top in Vivado):
+
+```
+attn_uart_top   (ports match the section 5 XDC: clk, rst_btn, uart_rx, uart_tx, led0)
++-- sync2ff        u_sync_rst   (rst_btn -> rst; its own rst tied 0, see above)
++-- sync2ff        u_sync_rx    (uart_rx pin -> rx_line_s; reset value 1 = line idle)
++-- heartbeat      u_heartbeat  (led0)
++-- uart_rx        u_rx
++-- uart_tx        u_tx
++-- attention_top  u_attn       (rtl/attention_top.sv, UNMODIFIED, no parameters)
+
+tile_runner     (VIO drives go/clr, ILA probes done/acc_flat; add your own
+                 sync2ff for rst_btn in the tiny Vivado wrapper, or probe/drive
+                 rst from VIO too)
++-- matmul_tile    u_tile       (rtl/matmul_tile.sv, UNMODIFIED; 16 x mac_unit)
+```
+
+Reminder from section 4: attention_top pulls in rtl/online_softmax.sv, which
+includes rtl/exp_lut.svh repo-root-relative; add the repo root as a Verilog
+include search path in Vivado.
+
+#### 6.3.2 Port tables
+
+sync2ff (parameters: WIDTH, default 1; RST_VAL, default '0):
+
+| Port | Dir | Width | Meaning |
+|------|-----|-------|---------|
+| clk | in | 1 | clock |
+| rst | in | 1 | synchronous, active-high (tied 0 only in the reset-button instance) |
+| d | in | WIDTH | asynchronous input |
+| q | out | WIDTH | synchronized output, 2-cycle latency |
+
+heartbeat (parameter: CLK_HZ, default 100_000_000):
+
+| Port | Dir | Width | Meaning |
+|------|-----|-------|---------|
+| clk | in | 1 | clock |
+| rst | in | 1 | synchronous, active-high |
+| led | out | 1 | toggles every CLK_HZ/2 cycles: ~1 Hz blink |
+
+uart_rx (parameters: CLK_HZ, default 100_000_000; BAUD, default 115_200):
+
+| Port | Dir | Width | Meaning |
+|------|-----|-------|---------|
+| clk | in | 1 | clock |
+| rst | in | 1 | synchronous, active-high |
+| rx | in | 1 | serial line, MUST already be synchronized (sync2ff upstream) |
+| data | out | 8 | last good byte, LSB received first; holds until the next |
+| valid | out | 1 | 1-cycle pulse: data is a new good frame |
+
+uart_tx (parameters: CLK_HZ, BAUD, same defaults):
+
+| Port | Dir | Width | Meaning |
+|------|-----|-------|---------|
+| clk | in | 1 | clock |
+| rst | in | 1 | synchronous, active-high |
+| data | in | 8 | byte to send |
+| valid | in | 1 | request; byte accepted on valid AND ready |
+| ready | out | 1 | high when idle (~86.8 us per byte at 115200) |
+| tx | out | 1 | serial line, idles high |
+
+attn_uart_top (parameters: CLK_HZ, BAUD, same defaults; port names
+deliberately match the section 5 XDC get_ports names):
+
+| Port | Dir | Width | Meaning |
+|------|-----|-------|---------|
+| clk | in | 1 | 100 MHz oscillator (W5) |
+| rst_btn | in | 1 | center button, active high when pressed (U18) |
+| uart_rx | in | 1 | from USB-UART bridge, host transmits here (B18) |
+| uart_tx | out | 1 | to USB-UART bridge, host receives here (A18) |
+| led0 | out | 1 | heartbeat (U16) |
+
+tile_runner (no parameters):
+
+| Port | Dir | Width | Meaning |
+|------|-----|-------|---------|
+| clk | in | 1 | clock |
+| rst | in | 1 | synchronous, active-high |
+| go | in | 1 | VIO level; internally rising-edge detected; starts one playback |
+| clr | in | 1 | VIO level; in idle/done clears accumulators and done |
+| done | out | 1 | high when the 16-cycle playback has finished; acc_flat stable |
+| acc_flat | out | 384 | 16 SACC Q11.12 accumulators (packing per docs/uarch.md 8.1) |
+
+#### 6.3.3 UART physical layer (normative for both uart modules)
+
+8N1: one start bit (low), 8 data bits LSB first, one stop bit (high), no
+parity, line idles high. Baud is set by localparam
+ClksPerBit = CLK_HZ / BAUD (integer division): 868 at the defaults, giving
+an actual baud of 115207, +0.006 percent error, negligible.
+
+Receiver: a full-rate counter paces each bit cell; the bit value is a
+majority-of-3 vote of samples taken at Mid - Step, Mid, and Mid + Step,
+where Mid = ClksPerBit/2 (= 434) and Step = ClksPerBit/16 (= 54). The
+start bit is qualified by the same vote: a false start (vote reads 1)
+returns to idle and emits nothing. The stop bit is voted too: a failed stop
+vote is a framing error and the byte is dropped silently (no valid pulse);
+the protocol layer never sees it. The receiver returns to idle right after
+the stop vote (count Mid + Step + 1), not at the end of the stop cell, so
+back-to-back frames tolerate small baud mismatch. Elaboration-time check:
+both uart modules raise $error at elaboration if CLK_HZ/BAUD < 16 (the vote
+spacing would collapse to zero); counter widths are derived with $clog2 from
+ClksPerBit, so no width is hand-sized.
+
+Transmitter: 10-bit shift register {stop, data, start}, tx wired to its low
+bit (registered, glitch-free, idles high). valid/ready handshake as in the
+port table.
+
+#### 6.3.4 The byte protocol (NORMATIVE)
+
+Transport: the 8N1 stream above. All multi-byte quantities are
+LITTLE-ENDIAN: least significant byte first. Q/K/V/output data bytes are ACT
+Q1.6 two's-complement codes (docs/uarch.md 3.1): value = code/64. Row
+indexes are 0..63 (only the low 6 bits are used); row payloads are always 16
+bytes, column 0 first, ascending. The FPGA sends a response for EVERY
+command; the host must read each response before assuming device state, and
+never needs to guess timing: run completion is observed by polling STATUS.
+
+| Cmd byte | Name | Host sends after cmd | FPGA responds | Effect |
+|----------|------|----------------------|---------------|--------|
+| 0x50 'P' | PING | nothing | 0xA5 | link test, no state change |
+| 0x51 'Q' | LOAD_Q | [row][16 data bytes] | 0x51 (after byte 16) | writes Q row, cols 0..15 |
+| 0x4B 'K' | LOAD_K | [row][16 data bytes] | 0x4B (after byte 16) | writes K row, cols 0..15 |
+| 0x56 'V' | LOAD_V | [row][16 data bytes] | 0x56 (after byte 16) | writes V row, cols 0..15 |
+| 0x4E 'N' | SET_NLEN | [n_len byte] | 0x4E | stores n_len[6:0]; must be a multiple of 4 in [4, 64] |
+| 0x52 'R' | RUN | nothing | 0x52 if started, 0x3F if busy | pulses attention_top start; clears the done latch |
+| 0x53 'S' | STATUS | nothing | 1 status byte | see status table below |
+| 0x4F 'O' | READ_OUT | [row] | 16 data bytes, col 0 first | reads output row (ACT Q1.6) |
+| 0x43 'C' | READ_CYCLES | nothing | 4 bytes, little-endian | cycle_count snapshot taken at the command byte |
+| other | unknown | n/a | 0x3F NAK | ignored; FSM stays in command state |
+
+Status byte:
+
+| Bit | Meaning |
+|-----|---------|
+| 0 | busy: attention_top is computing |
+| 1 | done latch: set by attention_top's done pulse, cleared when a RUN is accepted |
+| 7:2 | 0 |
+
+Error behavior, all of it:
+- Unknown command byte: NAK 0x3F, no state change. 0x3F is itself not a
+  command, so it can never be mistaken for an echo.
+- RUN while busy: NAK 0x3F and the start pulse is NOT issued (attention_top
+  only accepts start when idle; the FSM checks busy first).
+- LOAD_Q/K/V while busy: NOT gated. The load port writes straight into the
+  Q/K/V RAM regardless of attn_busy, so loading while a run is in progress
+  silently corrupts that run's inputs (uarch.md 8.3's load-before-use
+  protocol assumes otherwise). The host MUST poll STATUS and confirm busy=0
+  before issuing any LOAD_Q/K/V; fpga/host/attn_host.py never loads while a
+  run is outstanding, for exactly this reason.
+- SET_NLEN does not validate: the stored value feeds attention_top's n_len
+  input directly and is sampled by the core only at the start pulse. Sending
+  a value that is not a multiple of 4 in [4, 64] violates the 8.3 contract
+  and gives undefined results, exactly as in simulation. After reset the
+  stored default is 16; well-behaved hosts always SET_NLEN explicitly.
+- UART framing error: the byte is dropped before the protocol FSM sees it,
+  which desynchronizes any in-flight multi-byte command. A framing error
+  does not always mean silence, though: if the offending low period
+  outlasts one full failed-attempt window (section 6.3.3's start + 8 data
+  cells + stop-vote cycles), uart_rx can start a SECOND attempt while the
+  line is still low and this time read a legitimate (framing-valid) byte
+  once the line returns to idle mid-attempt -- typically all-1s (0xFF), an
+  unknown command, so the device transmits an UNSOLICITED NAK (0x3F) the
+  host never asked for. This is a real bench symptom: some USB-UART bridges
+  assert a BREAK condition on port open/close that looks exactly like this
+  to uart_rx. Hosts must be prepared to see and discard a stray 0x3F that
+  does not correspond to anything they sent; fpga/host/attn_host.py's
+  SerialLink drains the RX buffer on connect for this reason (see below).
+  Verified in simulation: tb/fpga_uart/test_fpga_uart.py's
+  test_framing_error_resilience.
+- Resync procedure (host side, CORRECTED -- the original wording here
+  under-specified the drain and was proven buggy by direct trace analysis):
+  if responses stop making sense, send 18 PING bytes (0x50) -- 18 covers the
+  longest possible in-flight payload (row + 16 data bytes + one command) --
+  then DRAIN every response byte, with a read timeout, until the line goes
+  quiet. Do NOT stop at the first 0xA5: an in-flight multi-byte command can
+  still be mid-flight when the pings start, so the drained bytes can include
+  an echo of that abandoned command followed by several more 0xA5 echoes
+  from pings that landed as fresh commands afterward (up to roughly 11 of
+  them for an 18-ping burst against a maximally-desynced LOAD_Q/K/V), and
+  parse_status also reads 0xA5 as busy=1, so treating the first 0xA5 as the
+  current status spins forever. Resync succeeds only if the LAST byte
+  drained (after the line has gone quiet) is 0xA5. Warning, unconditional:
+  the resync pings may be consumed as payload (0x50 is a legal row byte and
+  a legal ACT data code) and corrupt loaded rows; reload ALL inputs after a
+  resync, whether or not it "succeeded" quickly -- resync only recovers the
+  command stream, never data that was mid-load when the desync happened.
+  fpga/host/attn_host.py implements this as SerialLink.resync(); verified
+  in simulation: tb/fpga_uart/test_fpga_uart.py's test_resync_after_desync.
+
+Host flow for one inference: LOAD_Q/K/V for all n_len rows, SET_NLEN, RUN
+(expect 0x52), poll STATUS until bit1 is set (bit0 back to 0), READ_OUT per
+row, optionally READ_CYCLES, then compare bytes against model/attn.py
+attn_fixed. That comparison script IS the hardware test (section 6.2).
+
+Protocol FSM states (comments in fpga/attn_uart_top.sv name them
+identically): P_CMD (await command), P_LROW/P_LDATA (load row index, then 16
+write strobes into the sel/addr/wdata/we port), P_NLEN, P_OROW/P_OPIPE/
+P_OSEND (readout; P_OPIPE is the one dead cycle that matches rd_data's
+registered 1-cycle latency), P_CSEND (4 cycle_count bytes), P_SEND (single
+response byte). All responses go through uart_tx's valid/ready handshake, so
+the FSM stalls, never drops, when the line is slower than the state machine.
+
+#### 6.3.5 tile_runner stimulus and expected accumulators
+
+tile_runner plays exactly one 16-cycle Q/K stream into matmul_tile with clr
+asserted on the first cycle (the 8.1 contract: clr=1,en=1 starts a new tile
+with no dead cycle), then parks in a done state with the accumulators
+readable in place (output-stationary, nothing to drain).
+
+Constants (ACT codes, chosen so the dot products are hand-checkable and one
+row exercises sign):
+- Q row i is constant over d: codes +1, +2, +3, -4 for rows 0..3
+  (q_flat = 0xFC030201 every cycle).
+- K row j at element d: code (j+1)*(d+1), d = 0..15 (a 16-entry case ROM).
+
+mac semantics (docs/uarch.md 8.1/3.2): acc(i,j) accumulates the exact code
+product, so acc_code(i,j) = sum_d q_i * (j+1)*(d+1) = q_i * (j+1) * 136,
+since sum(1..16) = 136. SACC is Q11.12: real value = code / 4096. Expected
+acc_flat, element (i,j) at acc_flat[24*(4*i+j) +: 24]:
+
+| Q row i (code) | j=0 | j=1 | j=2 | j=3 |
+|----------------|-----|-----|-----|-----|
+| 0 (+1) | 136 = 0x000088 | 272 = 0x000110 | 408 = 0x000198 | 544 = 0x000220 |
+| 1 (+2) | 272 = 0x000110 | 544 = 0x000220 | 816 = 0x000330 | 1088 = 0x000440 |
+| 2 (+3) | 408 = 0x000198 | 816 = 0x000330 | 1224 = 0x0004C8 | 1632 = 0x000660 |
+| 3 (-4) | -544 = 0xFFFDE0 | -1088 = 0xFFFBC0 | -1632 = 0xFFF9A0 | -2176 = 0xFFF780 |
+
+On the ILA, trigger on done rising and read acc_flat against this table.
+go is rising-edge detected inside tile_runner, so a VIO level toggle runs
+the playback exactly once; clr (in idle/done) zeroes the accumulators via
+the tile's own clr=1,en=0 contract and drops done.
+
+#### 6.3.6 What has been checked, and what has not
+
+Checked in the sandbox (commands and exit codes recorded with the change):
+verilator --lint-only -Wall with each fpga top elaborating against rtl/;
+yosys generic elaboration (hierarchy/proc/opt/check -assert) on both tops
+with a $_DLATCH_ grep; verible-verilog-lint on fpga/.
+
+Also checked now, in simulation (fixed seed, COCOTB_RANDOM_SEED=1 and 7,
+exit 0 both): cocotb testbenches exist for BOTH fpga/ tops.
+tb/fpga_uart (attn_uart_top around the full, unmodified attention_top; 8
+tests, ClksPerBit=16 sim-speed override, see that Makefile) covers PING,
+LOAD_Q/K/V, SET_NLEN, RUN, STATUS, READ_OUT, and READ_CYCLES bit-exactly
+against model/attn.py attn_fixed; NAK-on-unknown-command; NAK-on-RUN-while-
+busy; UART framing-error resilience including the spurious-NAK-on-break
+case (6.3.4); resync after a deliberately abandoned frame (6.3.4); and
+reset recovery both mid-run and literally mid-UART-byte. A set-based check
+fails the run if any protocol command class was never exercised.
+tb/fpga_tile (tile_runner) has 1 directed test: acc_flat checked against
+both the documented 6.3.5 table and an independent dot-product computation.
+fpga/host/attn_host.py's own encode/decode logic (including the resync and
+RX-drain helpers) is covered offline by
+`python3 fpga/host/attn_host.py --selftest` (exit 0, no hardware, no
+pyserial needed) -- the same frame-builder/parser functions the cocotb
+tests import and drive bit-banged over simulated uart_rx/uart_tx.
+
+NOT done: no Vivado synthesis, no board, and none of the above ran against
+a real pyserial link or the board's real UART timing (the cocotb TBs
+bit-bang the wire in simulation with a reduced ClksPerBit purely for sim
+speed, not the board's 868 at the 115200/100MHz defaults). All hardware
+claims remain PENDING-HARDWARE; section 10 governs what may be recorded
+where.
 
 ## 7. Synthesis, implementation, bitstream
 
@@ -188,10 +503,22 @@ matters: WNS (worst negative slack) under Setup.
 - WNS >= 0: you met 100 MHz. The achievable Fmax estimate is
   1 / (10 ns - WNS). Quote it as "met 100 MHz with X ns setup slack on
   XC7A35T-1 (Vivado report_timing_summary)".
-- WNS < 0: you failed 100 MHz. Either slow the clock constraint (the Basys 3
-  clock can be divided down with a Clocking Wizard MMCM) or pipeline. For
-  the softmax path, docs/uarch.md 8.2 already reserves the registered-ROM
-  pipelining hook as the designed fix.
+- WNS < 0: you failed 100 MHz. Two designed-in fixes, in order:
+  1. For the softmax path: the registered-ROM pipelining is already
+     IMPLEMENTED as the PIPE_ROM parameter (docs/uarch.md 8.2.1, verified in
+     Phase 4). Rebuild with PIPE_ROM=1 on the online_softmax instance
+     (out_valid latency 2; on sky130 tt it roughly halved the critical path,
+     38.5 to 76.9 MHz; Artix-7 numbers will differ but the cut is the same).
+     Note attention_top instantiates the default 0, so this means editing
+     the instantiation for the FPGA build only, not the verified core.
+  2. Slow the clock with a Clocking Wizard MMCM: IP Catalog > Clocking
+     Wizard > clk_in1 100 MHz, one output clk_out1 at the target (50 or 25
+     MHz), Reset type Active High. Instantiate it in the wrapper between
+     the pin and the design clock, move create_clock onto the pin only
+     (the wizard's output clocks are auto-derived: use
+     get_clocks -of_objects after implementation to confirm), and hold the
+     design in reset until the wizard's locked output is high. Divide
+     first, optimize later: a slow correct board beats a fast dead one.
 - Also glance at hold (WHS >= 0; router fixes hold automatically almost
   always) and the unconstrained-paths section (should list nothing you care
   about).

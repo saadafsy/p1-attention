@@ -33,7 +33,8 @@ exists, a Beta auditor countersigned, AND I passed "grill me". I write all rtl/ 
 ## --- CORE COMPLETE ABOVE. Phases 6-7 do NOT start until 0-5 are Done. ---
 
 ## Phase 6 — FPGA (hardware, cannot reach Done in sandbox)
-- [Blocked: needs bench] fpga_bringup   (domain: hardware)  Basys 3 / XC7A35T / Vivado; guide: docs/phase6_fpga_guide.md; PENDING-HARDWARE until bench evidence
+- [Ready] fpga bring-up kit (fpga/ + host script + TBs)  (domain: sandbox)  roster-built; sim-verified 8/8 x2 seeds + tile 1/1 vs golden, dual-countersigned; fpga-kit-sim EVIDENCE row
+- [Blocked: needs bench] fpga_bringup   (domain: hardware)  Basys 3 / XC7A35T / Vivado; guide: docs/phase6_fpga_guide.md (now incl. shipped RTL/host code, 6.3); PENDING-HARDWARE until bench evidence
 
 ## Phase 7 — Physical design + silicon
 - [Todo] openlane RTL-to-GDS on the tile + KLayout screenshot  (domain: sandbox)  guide: docs/phase7_physical_guide.md
