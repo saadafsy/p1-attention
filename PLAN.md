@@ -24,7 +24,7 @@ exists, a Beta auditor countersigned, AND I passed "grill me". I write all rtl/ 
 - [Todo] formal/online_softmax_props.sv                    (domain: sandbox)  owner: ME
 
 ## Phase 4 — Synthesis + STA
-- [Todo] synth + OpenSTA report, one pipelining iteration  (domain: sandbox)
+- [Ready] synth + OpenSTA report, one pipelining iteration  (domain: sandbox)  PIPE_ROM registered-ROM variant of online_softmax (uarch 8.2.1, default 0 bit-identical); 38.5 -> 76.9 MHz sky130 tt for +9% area; dual re-audit + GLS both configs; phase4-sta EVIDENCE row; 10ns NOT met in either config (documented)
 
 ## Phase 5 — Verification plan + power proxy + tradeoffs writeup
 - [Todo] docs/verification_plan.md                          (domain: sandbox)

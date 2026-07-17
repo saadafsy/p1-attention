@@ -571,13 +571,10 @@ synth-check; flows that run tools from another working directory must map it
 (cocotb: an include dir pointing at the repo root; sby: a [files] line with
 destination path rtl/exp_lut.svh).
 
-Pipelining hook (Phase 4): the single-cycle combinational path
+Pipelining variant (Phase 4): the single-cycle combinational path
 diff -> clamp -> index -> ROM -> (l * r multiply) -> rshr -> add is the
-expected critical path of the whole design. The planned Phase 4 iteration is
-a registered-ROM variant (register w and r out of the lookup, moving the
-multiply/accumulate to the next stage); the recurrence arithmetic is
-unchanged, only latency and the out_valid alignment shift. Any such change
-updates this section first.
+expected critical path of the whole design. The registered-ROM variant that
+cuts it is parameterized into the module and specified in 8.2.1.
 
 Golden model files:
 - model/attn.py: normative executable spec (pure-integer core, emits
@@ -588,6 +585,76 @@ Golden model files:
 - model/crosscheck.py: generates random and corner cases, proves the two
   models bit-identical, reports the measured float error. Run via
   make model-check, which appends the EVIDENCE.md row on success.
+
+### 8.2.1 PIPE_ROM registered-ROM variant (NORMATIVE for Phase 4)
+
+Parameter: PIPE_ROM, 1 bit, default 0, on online_softmax only. PIPE_ROM = 0
+is the normative default: it elaborates exactly the single-cycle logic of
+8.2 (out_valid latency 1, same netlist semantics) and is the configuration
+attention_top instantiates; nothing in 8.3 changes. PIPE_ROM = 1 is the
+Phase 4 timing variant. The recurrence ARITHMETIC of 8.2 (the per-element
+values of m, l, w, r; all Q-formats; rounding sites 2 and 3; both Section 5
+clamps; the 3.6 no-saturation argument) is identical in both
+configurations. Only latency and alignment shift.
+
+Stage boundary (PIPE_ROM = 1): the critical path above is cut at the ROM
+output. Stage 1, the cycle that consumes s: row_start base mux for m,
+m_new = max, both 17-bit diffs, both clamps, both LUT lookups. The ROM
+outputs register into internal stage registers w_p and r_p together with a
+pipelined valid v_p (from in_valid) and pipelined row context rs_p (from
+row_start, so the row boundary travels with its element). Stage 2, the next
+cycle: l_base mux (rs_p selects 0), the 24u x 16u l * r multiply, rshr,
+add; on its commit edge the stage writes l and moves (w_p, r_p, v_p) to
+the visible (w, r, out_valid). out_valid latency becomes 2.
+
+m stays at latency 1, by necessity rather than preference: element k+1's
+stage-1 diffs must read the m already updated by element k (the m
+recurrence has to close in one cycle to sustain the throughput), and its
+compare-and-mux path is short, so it lives entirely in stage 1.
+Consequence: in PIPE_ROM = 1 the visible m LEADS out_valid by one cycle
+(m includes element k one cycle before out_valid announces k's w, r, l).
+In PIPE_ROM = 0 the two are aligned as specified in 8.2.
+
+l base for back-to-back elements: no forwarding network is needed, because
+the stage-2 accumulator IS the l register. The loop l -> multiply -> rshr
+-> add -> l closes combinationally inside stage 2, in one cycle, and
+elements enter stage 2 at most one per cycle, so when element k+1's stage 2
+evaluates, the l register already holds the value element k committed on
+the immediately preceding edge; the sequential per-element l recurrence is
+preserved exactly. Back-to-back rows: rs_p carries row_start down the pipe,
+so a new row's first element bases its stage-2 update at l = 0 even when
+the previous row's last l update commits on the very edge that starts the
+new element's stage-2 cycle. The previous row's final l is still visible
+during its own element's out_valid cycle, one cycle later than in
+PIPE_ROM = 0; the 8.2 invariant that the visible l already includes the
+element (w, r) describe during that element's out_valid cycle holds
+unchanged in both configurations.
+
+Throughput is unchanged: one element per cycle, no backpressure, rows may
+be issued back to back with no dead cycle, and the pipe drains by itself
+(an element accepted on the last in_valid cycle still commits and reports
+out_valid two cycles later).
+
+Cycle diagram for PIPE_ROM = 1, the same 3-element row as in 8.2:
+
+  cycle       |  0   |  1   |  2     |  3     |  4     |  5
+  in_valid    |  1   |  1   |  1     |  0     |  0     |  0
+  row_start   |  1   |  0   |  0     |  0     |  0     |  0
+  s           |  s0  |  s1  |  s2    |  x     |  x     |  x
+  m (visible) |  old |  s0  |  m1    |  m2    |  m2    |  m2
+  l (visible) |  old |  old |  l0    |  l1    |  l2    |  l2
+  out_valid   |  0   |  0   |  1     |  1     |  1     |  0
+  w (visible) |  x   |  x   |  w(s0) |  w(s1) |  w(s2) |  w(s2)
+  r (visible) |  x   |  x   |  r(s0) |  r(s1) |  r(s2) |  r(s2)
+
+Formal (formal/online_softmax.sby): two tasks, both required green. Task p0
+elaborates the default and keeps the audited latency-1 property list of 8.2
+unchanged. Task p1 elaborates PIPE_ROM = 1 via chparam and proves the
+config-independent clamp facts, the unchanged latency-1 m recurrence, and
+two-deep alignment properties (out_valid equals in_valid two cycles
+earlier; l, w, r hold and out_valid is low when no element was accepted two
+cycles earlier). Full recurrence checking for PIPE_ROM = 1 (values of l, w,
+r against the golden model) is cocotb's job, exactly as for PIPE_ROM = 0.
 
 ### 8.3 attention_top: 4-row-blocked integration (NORMATIVE, Phase 2)
 
