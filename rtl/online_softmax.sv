@@ -174,8 +174,18 @@ module online_softmax (
           // Section 6 identity 2 (max part): first element sets m = s0.
           assert (m == $past(s));
         end else begin
-          // m monotone non-decreasing between row starts.
+          // m monotone non-decreasing between row starts. Kept alongside the
+          // stronger property below (harmless, avoids churn in the audited
+          // property list); the exact-max recurrence strictly subsumes it.
           assert (m >= $past(m));
+          // Formal-coverage auditor finding: the monotonicity assert above
+          // passes even if m latched a wrong value larger than $past(m) (a
+          // bug that overshoots the true max would still look monotonic).
+          // This property pins m to the exact section-6 recurrence
+          // m_new = max(m, s), evaluated only over $past(s)/$past(m) (a
+          // comparison and a mux over already-registered values, no ROM or
+          // multiplier reasoning), so it strictly subsumes monotonicity.
+          assert (m == (($past(s) >= $past(m)) ? $past(s) : $past(m)));
         end
       end
     end
