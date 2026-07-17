@@ -41,9 +41,9 @@ module attn_uart_top #(
   // Command bytes (ASCII where printable) and fixed responses.
   // Normative table: docs/phase6_fpga_guide.md 6.3.4.
   localparam logic [7:0] CmdPing = 8'h50;  // 'P' -> 0xA5
-  localparam logic [7:0] CmdLoadQ = 8'h51;  // 'Q' [row][16 bytes] -> echo
-  localparam logic [7:0] CmdLoadK = 8'h4B;  // 'K' [row][16 bytes] -> echo
-  localparam logic [7:0] CmdLoadV = 8'h56;  // 'V' [row][16 bytes] -> echo
+  localparam logic [7:0] CmdLoadQ = 8'h51;  // 'Q' [row][16 bytes] -> echo, or NAK if busy
+  localparam logic [7:0] CmdLoadK = 8'h4B;  // 'K' [row][16 bytes] -> echo, or NAK if busy
+  localparam logic [7:0] CmdLoadV = 8'h56;  // 'V' [row][16 bytes] -> echo, or NAK if busy
   localparam logic [7:0] CmdNlen = 8'h4E;  // 'N' [n_len] -> echo
   localparam logic [7:0] CmdRun = 8'h52;  // 'R' -> echo, or NAK if busy
   localparam logic [7:0] CmdStatus = 8'h53;  // 'S' -> {6'b0, done_latch, busy}
@@ -229,19 +229,36 @@ module attn_uart_top #(
                 state    <= P_SEND;
               end
               CmdLoadQ: begin
-                sel_reg  <= 2'd0;
-                resp_reg <= rx_byte;
-                state    <= P_LROW;
+                // Loading while busy would corrupt the in-flight run; NAK
+                // at the command byte and consume no payload (guide 6.3.4).
+                if (attn_busy) begin
+                  resp_reg <= RespNak;
+                  state    <= P_SEND;
+                end else begin
+                  sel_reg  <= 2'd0;
+                  resp_reg <= rx_byte;
+                  state    <= P_LROW;
+                end
               end
               CmdLoadK: begin
-                sel_reg  <= 2'd1;
-                resp_reg <= rx_byte;
-                state    <= P_LROW;
+                if (attn_busy) begin
+                  resp_reg <= RespNak;
+                  state    <= P_SEND;
+                end else begin
+                  sel_reg  <= 2'd1;
+                  resp_reg <= rx_byte;
+                  state    <= P_LROW;
+                end
               end
               CmdLoadV: begin
-                sel_reg  <= 2'd2;
-                resp_reg <= rx_byte;
-                state    <= P_LROW;
+                if (attn_busy) begin
+                  resp_reg <= RespNak;
+                  state    <= P_SEND;
+                end else begin
+                  sel_reg  <= 2'd2;
+                  resp_reg <= rx_byte;
+                  state    <= P_LROW;
+                end
               end
               CmdNlen: begin
                 resp_reg <= rx_byte;

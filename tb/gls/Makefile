@@ -19,7 +19,6 @@ CELLS_SRC := $(HOME)/tools/oss-cad-suite/examples/eqy/spm
 REPO      := $(abspath ../..)
 BUILD     := $(REPO)/build
 CELLS     := $(BUILD)/gls_cells
-NCYC      := $(shell wc -l < $(BUILD)/gls_stim.hex 2>/dev/null || echo 0)
 
 IVFLAGS := -g2005 -DFUNCTIONAL -DUNIT_DELAY=
 

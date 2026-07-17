@@ -21,7 +21,7 @@ sim:
 	$(MAKE) -C tb/$(MODULE) SIM=verilator SEED=$(SEED) MODULE=
 
 coverage:
-	python3 scripts/check_coverage.py --line 90 --func 100
+	python3 scripts/check_coverage.py --line 90 --func 100 --module $(MODULE)
 
 synth-check:
 	yosys -p 'read_verilog -sv $(SRC); hierarchy -top $(MODULE); proc; opt; check -assert' 2>&1 | tee build/synth.log
@@ -42,7 +42,6 @@ PERIOD_NS ?= 10
 synth-netlist:
 	@mkdir -p build
 	yosys -p 'read_verilog -sv $(SRC); hierarchy -top $(MODULE); synth -top $(MODULE); dfflibmap -liberty $(LIB); abc -liberty $(LIB); opt_clean; stat -liberty $(LIB); write_verilog -noattr build/$(MODULE)_netlist.v' 2>&1 | tee build/synth_netlist_$(MODULE).log
-	@grep -q 'Warning\|ERROR' build/synth_netlist_$(MODULE).log && echo "(see log for warnings)" || true
 
 sta:
 	LIB=$(LIB) NETLIST=build/$(MODULE)_netlist.v MODULE=$(MODULE) PERIOD_NS=$(PERIOD_NS) \

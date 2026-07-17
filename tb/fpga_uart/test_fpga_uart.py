@@ -70,6 +70,7 @@ CLK_PERIOD_NS = 1_000_000_000.0 / CLK_HZ  # 625.0 ns
 REQUIRED_COMMANDS = {
     "PING", "LOAD_Q", "LOAD_K", "LOAD_V", "SET_NLEN", "RUN",
     "STATUS", "READ_OUT", "READ_CYCLES", "NAK_UNKNOWN", "NAK_BUSY", "RESYNC",
+    "NAK_LOAD_BUSY",
 }
 EXERCISED = set()  # module-level: shared across every test in this file
 
@@ -288,6 +289,21 @@ async def do_resync(dut, link, quiet_cycles):
     return attn_host.is_resynced(tail), tail
 
 
+async def do_load_busy_nak(link, cmd_byte, cmd_name):
+    """Send ONLY the LOAD_Q/K/V command byte (deliberately no row byte, no
+    payload): while attn_busy is set, attn_uart_top NAKs immediately from
+    P_CMD and never transitions to P_LROW/P_LDATA (guide 6.3.4, mirrors the
+    RUN-while-busy arm), so nothing else should ever be sent as part of this
+    frame. Callers prove that by sending a real command right after and
+    checking it is not mistaken for a row/payload byte."""
+    await link.send_byte(cmd_byte)
+    resp = await link.recv_byte()
+    EXERCISED.add(cmd_name)
+    if attn_host.is_nak(resp):
+        EXERCISED.add("NAK_LOAD_BUSY")
+    return resp
+
+
 async def do_unknown(link, byte):
     assert byte not in (
         attn_host.CMD_PING, attn_host.CMD_LOAD_Q, attn_host.CMD_LOAD_K,
@@ -431,6 +447,72 @@ async def test_run_while_busy_nak(dut):
             break
     else:
         raise TimeoutError("test_run_while_busy_nak: run never completed")
+
+
+@cocotb.test()
+async def test_load_while_busy_nak(dut):
+    """LOAD_Q/K/V sent while attention_top is busy must NAK (0x3F)
+    immediately at the command byte and consume NO row/payload bytes (guide
+    6.3.4, mirrors the RUN-while-busy arm; rtl-designer fix under review).
+    Proven three ways: (1) the response to the bare LOAD_Q command byte is
+    exactly 0x3F; (2) a PING sent immediately afterward gets a clean 0xA5,
+    which is only possible if the FSM stayed in P_CMD and did NOT swallow
+    the PING byte as a row index (had the NAK path wrongly fallen through
+    to P_LROW, the PING's 0x50 would have been consumed as a row byte
+    instead of interpreted as a command, and this PING would silently hang
+    waiting for 16 more data bytes that never come); (3) after the run
+    completes, READ_OUT matches model/attn.py attn_fixed bit-exactly,
+    proving the load attempt did not corrupt the in-flight run's inputs
+    either. Uses n_len=64 (nblk=16, 6593 core clocks, ~4.1 ms sim time),
+    the same setup as test_run_while_busy_nak, for enormous margin against
+    the run finishing before this multi-step check completes; STATUS is
+    also polled first to positively confirm busy=1 before proceeding."""
+    await start_and_reset(dut)
+    link = UartTbLink(dut)
+    rng = seeded_rng()
+    n = 64
+    q, k, v = random_qkv(rng, n)
+    await load_qkv(link, q, k, v)
+
+    resp = await do_set_nlen(link, n)
+    assert resp == attn_host.CMD_SET_NLEN
+
+    resp = await do_run(link)
+    assert resp == attn_host.CMD_RUN, f"RUN: expected echo, got {resp:#x}"
+
+    st = await do_status(link)
+    assert st["busy"], "test setup error: expected busy=1 right after RUN accepted"
+
+    resp2 = await do_load_busy_nak(link, attn_host.CMD_LOAD_Q, "LOAD_Q")
+    assert resp2 == attn_host.RESP_NAK, (
+        f"LOAD_Q-while-busy: expected NAK 0x3F, got {resp2:#x}"
+    )
+
+    resp3 = await do_ping(link)
+    assert resp3 == attn_host.RESP_PING, (
+        f"PING immediately after LOAD_Q-while-busy NAK: expected 0xA5, got "
+        f"{resp3:#x} (the FSM must have stayed in P_CMD, not swallowed this "
+        "PING byte as a row index left over from a wrongly-accepted LOAD_Q)"
+    )
+
+    for _ in range(2000):
+        st = await do_status(link)
+        if st["done"]:
+            assert not st["busy"], "STATUS: done latch set but busy also set"
+            break
+    else:
+        raise TimeoutError("test_load_while_busy_nak: run never completed")
+
+    got = [await do_read_out_row(link, row) for row in range(n)]
+    expected = golden(q, k, v)
+    for row in range(n):
+        for col in range(D):
+            assert got[row][col] == expected[row][col], (
+                f"post-LOAD-while-busy run: row={row} col={col} "
+                f"uart={got[row][col]} golden={expected[row][col]} "
+                "(the rejected LOAD_Q attempt must not have corrupted the "
+                "in-flight run's inputs)"
+            )
 
 
 @cocotb.test()
