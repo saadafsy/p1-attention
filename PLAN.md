@@ -27,7 +27,8 @@ exists, a Beta auditor countersigned, AND I passed "grill me". I write all rtl/ 
 - [Ready] synth + OpenSTA report, one pipelining iteration  (domain: sandbox)  PIPE_ROM registered-ROM variant of online_softmax (uarch 8.2.1, default 0 bit-identical); 38.5 -> 76.9 MHz sky130 tt for +9% area; dual re-audit + GLS both configs; phase4-sta EVIDENCE row; 10ns NOT met in either config (documented)
 
 ## Phase 5 — Verification plan + power proxy + tradeoffs writeup
-- [Todo] docs/verification_plan.md                          (domain: sandbox)
+- [Ready] docs/verification_plan.md                         (domain: sandbox)  394 lines, evidence-cited, written earlier; attention_top sections in plan voice pending writer refresh
+- [Ready] power proxy + docs/tradeoffs.md                   (domain: sandbox)  VCD toggle counts + calibrated report_power, naive vs PIPE_ROM, identical GLS stimulus; phase5-docs EVIDENCE row
 
 ## --- CORE COMPLETE ABOVE. Phases 6-7 do NOT start until 0-5 are Done. ---
 
