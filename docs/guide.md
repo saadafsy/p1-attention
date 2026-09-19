@@ -2074,7 +2074,7 @@ make -C tb/attention_top PIPE_ROM=1 SEED=1 MODULE= && make coverage MODULE=atten
 make perl-crosscheck                            # Perl ports == Python, byte for byte (PASSED 2026-09-19)
 make vhdl-crosscheck                            # VHDL mac_unit == SV mac_unit on the same vectors (ghdl + verilator)
 make -C tb/uvm smoke && make -C tb/uvm gate UVM_SEEDS=10   # UVM env (Vivado xsim), incl. injected-bug proof
-make -C fpga hw-gate PORT=/dev/ttyUSB1          # Nexys A7: bitstream, program, golden compare on hardware, clock sweep
+make -C fpga hw-gate PORT=/dev/ttyUSB1 BOARD=basys3   # bitstream, program, golden compare on hardware, clock sweep (or BOARD=nexys_a7)
 make diagrams                                   # render docs/wavedrom/*.json to docs/img/ (needs node)
 
 # Phase 5: toggle counts + calibrated power proxy

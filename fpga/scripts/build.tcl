@@ -1,7 +1,8 @@
-# Vivado batch build of fpga/nexys_a7_top.sv for the Nexys A7-100T.
+# Vivado batch build of fpga/nexys_a7_top.sv (the board-agnostic top) for
+# the Basys 3 (default) or the Nexys A7-100T.
 # Usage (from the repo root):
-#   vivado -mode batch -source fpga/scripts/build.tcl -tclargs <out_dir> <mult> <divclk> <out_div> <clk_hz>
-# e.g.  ... -tclargs build/fpga/f100 10 1 10 100000000
+#   vivado -mode batch -source fpga/scripts/build.tcl -tclargs <out_dir> <mult> <divclk> <out_div> <clk_hz> [basys3|nexys_a7]
+# e.g.  ... -tclargs build/fpga/f100 10 1 10 100000000 basys3
 # Writes <out_dir>/nexys_a7_top.bit, utilization/timing reports, and
 # <out_dir>/summary.txt (WNS, WHS, BRAM/DSP/LUT/FF counts, the four
 # exp-ROM implementation check). Exit 1 on any failure, including a
@@ -9,12 +10,18 @@
 # is never programmed as "working").
 #
 # UNVERIFIED: written without Vivado; validate on the first real run.
-if {$argc != 5} { puts "usage: build.tcl <out_dir> <mult> <divclk> <out_div> <clk_hz>"; exit 1 }
-lassign $argv out_dir mult divclk out_div clk_hz
+if {$argc < 5 || $argc > 6} { puts "usage: build.tcl <out_dir> <mult> <divclk> <out_div> <clk_hz> [basys3|nexys_a7]"; exit 1 }
+lassign $argv out_dir mult divclk out_div clk_hz board
+if {$board eq ""} { set board basys3 }
+switch -- $board {
+  basys3   { set part xc7a35tcpg236-1;  set xdc basys3.xdc }
+  nexys_a7 { set part xc7a100tcsg324-1; set xdc nexys_a7_100t.xdc }
+  default  { puts "ERROR: unknown board $board (basys3 | nexys_a7)"; exit 1 }
+}
 set root [file normalize [file join [file dirname [info script]] .. ..]]
 file mkdir $out_dir
 
-create_project -in_memory -part xc7a100tcsg324-1
+create_project -in_memory -part $part
 set_property target_language Verilog [current_project]
 # XILINX_FPGA selects fpga/exp_lut_2p_xilinx.sv (XPM block ROM) in online_softmax.sv
 set_property verilog_define {XILINX_FPGA=1} [current_fileset]
@@ -26,11 +33,11 @@ read_verilog -sv [list \
   $root/fpga/sync2ff.sv $root/fpga/heartbeat.sv $root/fpga/uart_rx.sv $root/fpga/uart_tx.sv \
   $root/fpga/exp_lut_2p_xilinx.sv $root/fpga/attn_uart_top.sv $root/fpga/nexys_a7_top.sv]
 read_mem $root/fpga/exp_lut.mem
-read_xdc $root/fpga/nexys_a7_100t.xdc
+read_xdc $root/fpga/$xdc
 
 set generics [list \
   CLKFBOUT_MULT_F=$mult DIVCLK_DIVIDE=$divclk CLKOUT0_DIVIDE_F=$out_div CLK_HZ=$clk_hz]
-synth_design -top nexys_a7_top -part xc7a100tcsg324-1 -generic $generics
+synth_design -top nexys_a7_top -part $part -generic $generics
 report_utilization -file $out_dir/util_synth.rpt
 
 # Gate 1: the four lane exp ROMs must be block RAM, not distributed LUT ROM.
@@ -52,7 +59,7 @@ set whs [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -hold]]
 set util [report_utilization -return_string]
 
 set f [open $out_dir/summary.txt w]
-puts $f "part xc7a100tcsg324-1"
+puts $f "board $board part $part xdc $xdc"
 puts $f "mmcm mult=$mult divclk=$divclk out_div=$out_div clk_hz=$clk_hz"
 puts $f "setup WNS $wns"
 puts $f "hold WHS $whs"
