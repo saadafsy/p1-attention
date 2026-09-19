@@ -56,10 +56,15 @@
 // PIPE_ROM = 1 shifts l, w, r, out_valid one cycle right (m unchanged);
 // diagram and back-to-back row semantics in uarch.md 8.2.1.
 //
-// exp LUT: combinational ROM exp_lut_rom() from the GENERATED include
-// rtl/exp_lut.svh (emitted only by model/attn.py --emit-lut-svh; same table
-// as the sha256-pinned model/exp_lut.hex; rationale in uarch.md 8.2). Two
-// lookups per cycle (w and r) are two muxes of the same constant table.
+// exp LUT: the GENERATED case function exp_lut_rom() in rtl/exp_lut.svh
+// (emitted only by model/attn.py --emit-lut-svh; same table as the
+// sha256-pinned model/exp_lut.hex; rationale in uarch.md 8.2). PIPE_ROM = 0
+// reads it combinationally (two muxes of the same constant table).
+// PIPE_ROM = 1 (2026-09-19) reads it through rtl/exp_lut_2p.sv, a two-port
+// registered-output ROM module whose output registers ARE the w_p / r_p
+// stage-1 registers of uarch.md 8.2.1; with `define XILINX_FPGA the FPGA
+// twin fpga/exp_lut_2p_xilinx.sv (one true dual-port block RAM per lane)
+// is instantiated instead, same ports, same latency, same contents.
 module online_softmax #(
     parameter bit PIPE_ROM = 1'b0  // 0: latency-1 (normative); 1: uarch 8.2.1
 ) (
@@ -104,8 +109,6 @@ module online_softmax #(
   logic        [10:0] idxp_w;
   logic        [ 9:0] idx_r;  // final LUT indices (index clamp, section 5)
   logic        [ 9:0] idx_w;
-  logic        [15:0] r_n;  // ROM outputs = next w, r
-  logic        [15:0] w_n;
 
   // All signals assigned unconditionally: no latches.
   always_comb begin
@@ -117,13 +120,14 @@ module online_softmax #(
     idxp_w = lut_index_pre(diff_s);
     idx_r  = (idxp_r > 11'd1023) ? 10'd1023 : idxp_r[9:0];
     idx_w  = (idxp_w > 11'd1023) ? 10'd1023 : idxp_w[9:0];
-    r_n    = exp_lut_rom(idx_r);
-    w_n    = exp_lut_rom(idx_w);
   end
 
   if (PIPE_ROM == 1'b0) begin : g_lat1
     // Normative latency-1 configuration (uarch.md 8.2): the whole recurrence
-    // closes in the cycle that consumes s.
+    // closes in the cycle that consumes s. Both ROM lookups are
+    // combinational reads of the generated case function.
+    logic [15:0] r_n;  // ROM outputs = next w, r
+    logic [15:0] w_n;
     logic [23:0] l_base;
     logic [39:0] lr_prod;  // l * r, 24u x 16u, never registered
     logic [40:0] lr_rnd;  // + 2^14 round-half-up bias
@@ -131,6 +135,8 @@ module online_softmax #(
     logic [23:0] l_n;
 
     always_comb begin
+      r_n     = exp_lut_rom(idx_r);
+      w_n     = exp_lut_rom(idx_w);
       l_base  = row_start ? 24'd0 : l;
       // Rounding site 3: l = rshr(l * r, 15) + w. Bits above 23 of the
       // shifted value are provably zero for spec-compliant rows (l <= 2^23
@@ -171,9 +177,26 @@ module online_softmax #(
     // back-to-back new row cannot corrupt the update in flight.
     logic        v_p;  // stage-1/2 pipe: element in flight
     logic        rs_p;  // pipelined row_start of that element
-    logic [15:0] w_p;  // pipelined ROM outputs
+    logic [15:0] w_p;  // registered ROM outputs (the ROM module's output regs)
     logic [15:0] r_p;
     logic [23:0] l_base;
+
+    // The stage boundary of uarch.md 8.2.1 IS the ROM's output register:
+    // w_p / r_p update on the accepting edge (en = in_valid) and hold
+    // otherwise, exactly as the inline registers they replace did.
+`ifdef XILINX_FPGA
+    exp_lut_2p_xilinx u_rom (
+`else
+    exp_lut_2p u_rom (
+`endif
+        .clk   (clk),
+        .rst   (rst),
+        .en    (in_valid),
+        .addr_a(idx_w),
+        .addr_b(idx_r),
+        .dout_a(w_p),
+        .dout_b(r_p)
+    );
     logic [39:0] lr_prod;  // l * r, 24u x 16u, never registered
     logic [40:0] lr_rnd;  // + 2^14 round-half-up bias
     logic [23:0] l_resc;  // rshr(l * r, 15)
@@ -198,15 +221,12 @@ module online_softmax #(
         out_valid <= 1'b0;
         v_p       <= 1'b0;
         rs_p      <= 1'b0;
-        w_p       <= 16'd0;
-        r_p       <= 16'd0;
       end else begin
-        // Stage 1 commit: m plus the pipe registers.
+        // Stage 1 commit: m plus the pipe context (w_p / r_p commit inside
+        // u_rom on the same edge, same in_valid enable).
         v_p <= in_valid;
         if (in_valid) begin
           m    <= m_n;
-          w_p  <= w_n;
-          r_p  <= r_n;
           rs_p <= row_start;
         end
         // Stage 2 commit: the l update and the visible w, r, out_valid.

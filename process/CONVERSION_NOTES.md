@@ -33,14 +33,14 @@ side by side, or the defense stays the agent's and not theirs.
    silicon-* PENDING-HARDWARE.
 
 ## The one discipline that makes this work
-Mode B must be run from a BLANK file with guide.md/rtl closed. Side-by-side replication
+Mode B must be run from a BLANK file with docs/guide.md/rtl closed. Side-by-side replication
 is transcription and defeats the project. The gate (no Mode B without VERIFY OK) keeps
 the writer from tutoring a half-built module, but only the user can keep the blank-file
 rule. Make the grill brutal; a block is not "yours" until you pass it with nothing open.
 
 ## Run order
-1. Put CLAUDE.md, technical-writer.md, asic-guide-fidelity-rubric.md,
-   P1_Attention_Engine_Build_Sheet.md in the repo root.
+1. Put CLAUDE.md, process/technical-writer.md, process/asic-guide-fidelity-rubric.md,
+   process/P1_Attention_Engine_Build_Sheet.md in the repo root.
 2. bash setup-p1.sh
 3. Fill docs/uarch.md (Q-format, tile size, pipeline depth) or let rtl-designer draft it.
 4. claude ->  "Build Phase 0 then mac_unit per the build sheet. Stop after verify."

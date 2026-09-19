@@ -1,4 +1,4 @@
-# ASIC guide.md fidelity rubric
+# ASIC docs/guide.md fidelity rubric
 
 The measurable version of "same level of detail as the STM32 guide." The writer is
 graded against this per section; the verifier can run it too. Each row is a depth

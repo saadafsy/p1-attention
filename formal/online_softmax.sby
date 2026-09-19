@@ -45,10 +45,12 @@ smtbmc z3
 
 [script]
 p0: read_verilog -sv -formal -DFORMAL online_softmax.sv
+p1: read_verilog -sv -formal -DFORMAL exp_lut_2p.sv
 p1: read_verilog -sv -formal -DFORMAL -defer online_softmax.sv
 p1: chparam -set PIPE_ROM 1 online_softmax
 prep -top online_softmax
 
 [files]
 rtl/online_softmax.sv
+rtl/exp_lut_2p.sv
 rtl/exp_lut.svh rtl/exp_lut.svh

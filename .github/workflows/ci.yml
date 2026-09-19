@@ -1,0 +1,89 @@
+# CI for p1-attention (added 2026-09-19). Proves `make verify` runs on a clean
+# machine, per module in build order, with pinned tools. It runs the public
+# command (not the legs individually) and never mutates the checkout:
+# VERIFY_NO_LEDGER=1 skips the EVIDENCE.md append, and a final
+# `git diff --exit-code` fails the job if any tracked file changed.
+#
+# Status: UNVERIFIED until this workflow has been observed green on GitHub;
+# the README badge shows whatever GitHub reports. The OSS CAD Suite archive
+# is pinned by date; set the OSS_CAD_SHA256 repository variable after the
+# first run prints the digest, and the download is then verified.
+#
+# UVM (tb/uvm) is NOT run here: it needs Vivado xsim, which cannot be
+# installed on a hosted runner (license + ~40 GB). See tb/uvm/README.md.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  OSS_CAD_TAG: "2026-09-18"
+  OSS_CAD_FILE: "oss-cad-suite-linux-x64-20260918.tgz"
+  # Pin these after the first successful run (Settings > Variables):
+  #   OSS_CAD_SHA256, VERIBLE_URL (a release tarball), VERIBLE_SHA256
+  COCOTB_SPEC: "cocotb>=2.0,<2.1"
+
+jobs:
+  toolchain:
+    # Fast fail-first diagnosis: the same tool_smoke gate CLAUDE.md demands
+    # before any module is touched, plus the pure-Python/Perl gates.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-tools
+      - run: make verify MODULE=tool_smoke COVERAGE_STUB=1 VERIFY_NO_LEDGER=1
+      - run: make model-check VERIFY_NO_LEDGER=1
+      - run: make perl-crosscheck
+      - run: make audit-guide
+      - name: No tracked file may change
+        run: git diff --exit-code
+
+  verify:
+    needs: toolchain
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [mac_unit, matmul_tile, online_softmax, attention_top]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-tools
+      - name: Verify ${{ matrix.module }} (seed 1)
+        run: make verify MODULE=${{ matrix.module }} SEED=1 VERIFY_NO_LEDGER=1
+      - name: Second seed (sim + coverage only)
+        run: |
+          make sim MODULE=${{ matrix.module }} SEED=7
+          make coverage MODULE=${{ matrix.module }}
+      - name: PIPE_ROM=1 leg (online_softmax and attention_top)
+        if: matrix.module == 'online_softmax' || matrix.module == 'attention_top'
+        run: |
+          make -C tb/${{ matrix.module }} PIPE_ROM=1 SEED=1 MODULE=
+          make coverage MODULE=${{ matrix.module }} PIPE_ROM=1
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ matrix.module }}
+          path: |
+            build/
+            tb/${{ matrix.module }}/coverage*.dat
+            tb/${{ matrix.module }}/func_coverage*.txt
+            tb/${{ matrix.module }}/results*.xml
+            formal/${{ matrix.module }}*/logfile.txt
+          if-no-files-found: ignore
+      - name: No tracked file may change
+        run: git diff --exit-code
+
+  fpga-kit-and-vhdl:
+    needs: toolchain
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-tools
+      - run: make -C tb/fpga_uart SEED=1 MODULE=
+      - run: make -C tb/fpga_tile MODULE=
+      - run: python3 fpga/host/attn_host.py --selftest
+      - run: make vhdl-crosscheck
+      - name: No tracked file may change
+        run: git diff --exit-code

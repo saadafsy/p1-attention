@@ -18,3 +18,11 @@ formal/*/
 obj_dir/
 .claude/settings.local.json
 .history_sta
+tb/vhdl_mac/trace_*.txt
+tb/vhdl_mac/sim_build*/
+tb/vhdl_mac/results*.xml
+tb/uvm/xsim.dir/
+tb/uvm/*.log
+tb/uvm/*.jou
+tb/uvm/*.pb
+tb/uvm/*.wdb

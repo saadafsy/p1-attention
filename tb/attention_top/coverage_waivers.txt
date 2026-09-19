@@ -1,12 +1,12 @@
 # Documented-unreachable line-coverage points for attention_top
 # (consumed by scripts/check_coverage.py; format: <source basename>:<line> <reason>).
-# Line numbers refer to rtl/attention_top.sv after the 2026-09-18 shared-PV rewrite;
+# Line numbers refer to rtl/attention_top.sv after the 2026-09-19 PIPE_ROM plumbing edit;
 # regenerate coverage.dat (make sim MODULE=attention_top) before gating.
 # A waiver must name an instrumented, UNHIT line or the gate fails.
-attention_top.sv:164 default arm of the unique-case prefetch block: state_e has exactly 4 encodings, all enumerated
-attention_top.sv:333 score saturation high side: unreachable at D=16, |s_shift| <= 2^14 (uarch.md 3.3)
-attention_top.sv:334 score saturation low side: same D=16 bound, defensive only (uarch.md 3.3)
-attention_top.sv:531 output saturation high side: |q| <= 128 by uarch.md 3.8, defensive only
-attention_top.sv:532 output saturation low side: same bound, defensive only (uarch.md 3.8)
-attention_top.sv:584 default arm of the unique-case state_n block: all 4 states enumerated
-attention_top.sv:638 default arm of the unique-case sequential FSM block: all 4 states enumerated
+attention_top.sv:177 default arm of the unique-case prefetch block: state_e has exactly 4 encodings, all enumerated
+attention_top.sv:362 score saturation high side: unreachable at D=16, |s_shift| <= 2^14 (uarch.md 3.3)
+attention_top.sv:363 score saturation low side: same D=16 bound, defensive only (uarch.md 3.3)
+attention_top.sv:579 output saturation high side: |q| <= 128 by uarch.md 3.8, defensive only
+attention_top.sv:580 output saturation low side: same bound, defensive only (uarch.md 3.8)
+attention_top.sv:632 default arm of the unique-case state_n block: all 4 states enumerated
+attention_top.sv:686 default arm of the unique-case sequential FSM block: all 4 states enumerated

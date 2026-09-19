@@ -16,6 +16,51 @@ Audience: you have used Quartus but never Vivado. Differences are called out
 explicitly. Time budget: one weekend for tool install + first bitstream, one
 weekend for real bring-up.
 
+## 0. Bring-up log (Nexys A7-100T), to be filled by the run
+
+Added 2026-09-19 (target-scores change 2). The board decision moved from
+the Basys 3 to the Nexys A7-100T (same Artix-7 family and Vivado flow, more
+fabric, DDR2 for later work); sections 1 to 10 below remain the click-by-
+click Basys 3 walkthrough and stay valid for the Nexys A7 except for the
+pins, which live in fpga/nexys_a7_100t.xdc. The Nexys A7 flow is scripted:
+
+| Step | Command (repo root) | Gate | Result (fill in) |
+|------|---------------------|------|------------------|
+| 1 heartbeat | `make -C fpga bitstream F_MHZ=100` then `make -C fpga program` | LED0 blinks ~1 Hz, LED1 (MMCM locked) on | |
+| 2 UART loopback | `python3 -c "..."` PING over `fpga/host/attn_host.py` (`link.ping()` == 0xA5) | 0xA5 returned | |
+| 3 protocol | `make -C fpga hw-test PORT=/dev/ttyUSB1` | every LOAD/RUN/READ_OUT byte matches model/attn.py at n=16 and n=64 | |
+| 4 clock sweep | `make -C fpga sweep FREQS=50,75,100,110,125,140` | build/fpga/sweep.csv; last PASS row = measured max | |
+| 5 evidence | `make -C fpga hw-gate` (1+3+4 in one) then append the EVIDENCE row | row cites Vivado version, util report, sweep.csv, measured max | |
+
+Fields the EVIDENCE row must carry (nothing else is claimable):
+
+- Board and part: Nexys A7-100T, xc7a100tcsg324-1; Vivado version: ____
+- Constraints: fpga/nexys_a7_100t.xdc; top: fpga/nexys_a7_top.sv (MMCM
+  parameters per build, VCO 1000 MHz, design clock = 1000 / CLKOUT0_DIVIDE)
+- Utilization at 100 MHz (util_impl.rpt): LUT ____ FF ____ BRAM ____ DSP ____;
+  exp ROMs implemented as ____ block-RAM primitives (build.tcl gate: >= 4)
+- Timing at 100 MHz (timing.rpt): setup WNS ____ ns, hold WHS ____ ns
+- Correctness on hardware: attn_host.py n=16 seed 1 ____, n=64 seed 7 ____
+  (READ_OUT bytes vs model/attn.py attn_fixed, READ_CYCLES vs the closed form)
+- Sweep table (sweep.csv): freq / WNS / built / programmed / hw_test per row;
+  MEASURED maximum passing frequency: ____ MHz (last PASS on the board;
+  the WNS column is a tool number and is not the measurement)
+- Photo or short video of the board running the host test: docs/bench/____
+
+Until every field is filled, everything in fpga/ is verified in simulation
+only (EVIDENCE rows fpga-kit-sim and audit-fpga-kit-*), the Nexys A7 files
+(XDC, MMCM top, build/program/sweep scripts, XPM exp ROM) have never been
+run through Vivado, and every hardware claim stays PENDING-HARDWARE.
+
+Prerequisite already in the tree (change list item "fix the exp LUT"): with
+`XILINX_FPGA` defined (build.tcl does), each online_softmax lane reads its
+two exp lookups from one XPM dual-port block ROM (fpga/exp_lut_2p_xilinx.sv,
+initialized from fpga/exp_lut.mem, the same bytes as model/exp_lut.hex, both
+verified by `make model-check`); attn_uart_top instantiates attention_top
+with PIPE_ROM = 1, the registered-read configuration that block ROM
+requires. build.tcl fails the build if fewer than four block-RAM
+primitives implement those ROMs.
+
 ## 1. What you need
 
 | Item | Detail |
@@ -229,7 +274,7 @@ attn_uart_top   (ports match the section 5 XDC: clk, rst_btn, uart_rx, uart_tx, 
 +-- heartbeat      u_heartbeat  (led0)
 +-- uart_rx        u_rx
 +-- uart_tx        u_tx
-+-- attention_top  u_attn       (rtl/attention_top.sv, UNMODIFIED, no parameters)
++-- attention_top  u_attn       (rtl/attention_top.sv, UNMODIFIED, PIPE_ROM = 1)
 
 tile_runner     (VIO drives go/clr, ILA probes done/acc_flat; add your own
                  sync2ff for rst_btn in the tiny Vivado wrapper, or probe/drive
@@ -585,6 +630,6 @@ EVIDENCE.md something like:
 | fpga-bringup-matmul_tile | tile computes correct dot products on Basys 3 at 100 MHz | PASS | host script vs model/attn.py, N vectors; Vivado timing summary WNS=+X ns; photos/ILA captures in docs/bench/ | 0 |
 
 Until that row exists, everything in this file is a plan, the PLAN.md row
-stays [Blocked: needs bench], and no FPGA claim may appear in guide.md or a
-resume bullet. The audit-guide hook enforces this for guide.md; you enforce
+stays [Blocked: needs bench], and no FPGA claim may appear in docs/guide.md or a
+resume bullet. The audit-guide hook enforces this for docs/guide.md; you enforce
 it everywhere else.

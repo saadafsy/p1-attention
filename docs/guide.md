@@ -1,4 +1,4 @@
-# guide.md: Streaming Attention Engine, Phases -1 to 5 (builder documentation)
+# docs/guide.md: Streaming Attention Engine, Phases -1 to 5 (builder documentation)
 
 Scope of this document: Phase -1 (toolchain smoke test), Phase 0 (bit-accurate
 golden models), the four dual-countersigned RTL modules (mac_unit,
@@ -2067,6 +2067,16 @@ make gls                # expect "GLS PASS: 546 cycles checked, 0 errors" x2
 # Snapshot the build/ reports an EVIDENCE row cites into the tracked tree
 make evidence-snapshot
 
+# Added 2026-09-19 (target-scores changes), each with its own evidence gate;
+# none has been run where it was written:
+make sta-top PERIOD_NS=10                       # attention_top STA + summary (WNS, path owner)
+make -C tb/attention_top PIPE_ROM=1 SEED=1 MODULE= && make coverage MODULE=attention_top PIPE_ROM=1
+make perl-crosscheck                            # Perl ports == Python, byte for byte (PASSED 2026-09-19)
+make vhdl-crosscheck                            # VHDL mac_unit == SV mac_unit on the same vectors (ghdl + verilator)
+make -C tb/uvm smoke && make -C tb/uvm gate UVM_SEEDS=10   # UVM env (Vivado xsim), incl. injected-bug proof
+make -C fpga hw-gate PORT=/dev/ttyUSB1          # Nexys A7: bitstream, program, golden compare on hardware, clock sweep
+make diagrams                                   # render docs/wavedrom/*.json to docs/img/ (needs node)
+
 # Phase 5: toggle counts + calibrated power proxy
 python3 scripts/toggle_count.py build/gls_lat1.vcd build/gls_lat2.vcd
 LIB=$LIB NETLIST=build/online_softmax_netlist.v MODULE=online_softmax \
@@ -2079,6 +2089,13 @@ python3 model/attn.py --emit-lut-svh rtl/exp_lut.svh
 # Audit this document for unbacked hardware claims
 make audit-guide
 ```
+
+Additions of 2026-09-19 not documented section by section above (they
+have no results yet): tb/uvm (README there), rtl_vhdl and tb/vhdl_mac,
+fpga/nexys_a7_* and fpga/scripts, rtl/exp_lut_2p.sv with the attention_top
+PIPE_ROM plumbing (docs/uarch.md 8.2.1 and 8.3), scripts/sta_summary.py,
+.github/workflows/ci.yml, docs/diagrams.md. This guide was moved from the
+repo root to docs/ on the same date; its content is unchanged.
 
 Key artifacts to inspect: EVIDENCE.md (the claim ledger), docs/uarch.md
 (the normative numeric contract, incl. 8.2.1 and 8.3), docs/benchmark.md

@@ -3,3 +3,4 @@ rtl/mac_unit.sv
 rtl/matmul_tile.sv
 rtl/online_softmax.sv
 rtl/attention_top.sv
+rtl/exp_lut_2p.sv

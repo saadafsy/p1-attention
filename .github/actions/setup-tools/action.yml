@@ -1,0 +1,61 @@
+name: setup-tools
+description: Pinned OSS CAD Suite (verilator, yosys, sby, yices, iverilog, ghdl), verible, cocotb 2.x
+runs:
+  using: composite
+  steps:
+    - name: Install OSS CAD Suite (pinned by date)
+      shell: bash
+      env:
+        OSS_CAD_SHA256: ${{ vars.OSS_CAD_SHA256 }}
+      run: |
+        set -euo pipefail
+        url="https://github.com/YosysHQ/oss-cad-suite-build/releases/download/${OSS_CAD_TAG}/${OSS_CAD_FILE}"
+        curl -sSL "$url" -o /tmp/oss-cad-suite.tgz
+        digest=$(sha256sum /tmp/oss-cad-suite.tgz | cut -d " " -f1)
+        echo "oss-cad-suite ${OSS_CAD_FILE} sha256=${digest}"
+        if [ -n "${OSS_CAD_SHA256:-}" ]; then
+          if [ "$digest" != "$OSS_CAD_SHA256" ]; then echo "sha256 mismatch: expected $OSS_CAD_SHA256"; exit 1; fi
+        else
+          echo "::warning::OSS_CAD_SHA256 repository variable not set; pin it to ${digest}"
+        fi
+        tar -C "$RUNNER_TEMP" -xzf /tmp/oss-cad-suite.tgz
+        echo "$RUNNER_TEMP/oss-cad-suite/bin" >> "$GITHUB_PATH"
+
+    - name: Install verible (pinned by URL variable, else latest release)
+      shell: bash
+      env:
+        VERIBLE_URL: ${{ vars.VERIBLE_URL }}
+        VERIBLE_SHA256: ${{ vars.VERIBLE_SHA256 }}
+      run: |
+        set -euo pipefail
+        url="${VERIBLE_URL:-}"
+        if [ -z "$url" ]; then
+          url=$(curl -sSL https://api.github.com/repos/chipsalliance/verible/releases/latest \
+                | python3 -c "import json,sys; a=[x['browser_download_url'] for x in json.load(sys.stdin)['assets'] if 'linux-static-x86_64' in x['name']]; print(a[0])")
+          echo "::warning::VERIBLE_URL not set; using latest release $url (pin it)"
+        fi
+        curl -sSL "$url" -o /tmp/verible.tgz
+        if [ -n "${VERIBLE_SHA256:-}" ]; then
+          echo "${VERIBLE_SHA256}  /tmp/verible.tgz" | sha256sum -c -
+        fi
+        mkdir -p "$RUNNER_TEMP/verible"
+        tar -C "$RUNNER_TEMP/verible" --strip-components=1 -xzf /tmp/verible.tgz
+        echo "$RUNNER_TEMP/verible/bin" >> "$GITHUB_PATH"
+
+    - name: Install cocotb
+      shell: bash
+      run: |
+        python3 -m pip install --upgrade pip
+        python3 -m pip install "${COCOTB_SPEC}" numpy
+
+    - name: Record tool versions
+      shell: bash
+      run: |
+        verilator --version
+        yosys -V
+        sby --version || true
+        iverilog -V | head -1
+        ghdl --version | head -1
+        verible-verilog-lint --version | head -1
+        perl -v | sed -n 2p
+        python3 -c "import cocotb; print('cocotb', cocotb.__version__)"

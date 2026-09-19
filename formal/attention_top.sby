@@ -60,7 +60,7 @@ cover: depth 180
 smtbmc yices
 
 [script]
-read_verilog -sv -formal -DFORMAL mac_unit.sv matmul_tile.sv online_softmax.sv attention_top.sv
+read_verilog -sv -formal -DFORMAL mac_unit.sv matmul_tile.sv exp_lut_2p.sv online_softmax.sv attention_top.sv
 prep -top attention_top
 chformal -assert -remove mac_unit
 chformal -assert -remove matmul_tile
@@ -69,6 +69,7 @@ chformal -assert -remove online_softmax
 [files]
 rtl/mac_unit.sv
 rtl/matmul_tile.sv
+rtl/exp_lut_2p.sv
 rtl/online_softmax.sv
 rtl/attention_top.sv
 rtl/exp_lut.svh rtl/exp_lut.svh

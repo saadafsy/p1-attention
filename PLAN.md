@@ -3,7 +3,7 @@
 Task format:  [Status] <module>  (domain: sandbox|hardware)  owner: <who>
 Status: [Todo] [Building] [Ready] [Done] [Blocked: needs bench]
 Only Lead moves a task to [Done], and only after: make verify exits 0, an EVIDENCE row
-exists, a Beta auditor countersigned, AND I passed "grill me". Per CONVERSION_NOTES.md the
+exists, a Beta auditor countersigned, AND I passed "grill me". Per process/CONVERSION_NOTES.md the
 agents build rtl/ and formal/ in builder mode; my ownership is the Mode-B replication.
 
 2026-09-18 review (EVIDENCE.md errata + review-fixes-20260918): the items marked
@@ -40,6 +40,18 @@ agents build rtl/ and formal/ in builder mode; my ownership is the Mode-B replic
 ## Phase 6: FPGA (hardware, cannot reach Done in sandbox)
 - [Building] fpga bring-up kit (fpga/ + host script + TBs)  (domain: sandbox)  re-verify: attn_uart_top now NAKs bad SET_NLEN and READ_OUT/READ_CYCLES while busy, sync2ff tags both flops, 2 new TB tests (2026-09-18); last verified: fpga-kit-sim 9/9 x2 seeds
 - [Blocked: needs bench] fpga_bringup   (domain: hardware)  Basys 3 / XC7A35T / Vivado; guide: docs/phase6_fpga_guide.md (now incl. shipped RTL/host code, 6.3); PENDING-HARDWARE until bench evidence
+
+## Target-scores work (2026-09-19; see the change list, every item gated)
+- [Ready] benchmark math fix                      (domain: sandbox)  docs/benchmark.md corrected + load-cycle note (review-fixes)
+- [Ready] repo hygiene                            (domain: sandbox)  process/, docs/guide.md, README rewrite, diagrams.md
+- [Ready] perl ports                              (domain: sandbox)  scripts/*.pl, make perl-crosscheck PASSED 2026-09-19
+- [Building] top-level STA                        (domain: sandbox)  make sta-top + scripts/sta_summary.py written; needs yosys/OpenSTA run
+- [Building] diagrams                             (domain: sandbox)  Mermaid in README/docs/diagrams.md render on GitHub; WaveDrom JSON needs `make diagrams` (node) for the SVG
+- [Building] GitHub Actions CI                    (domain: sandbox)  .github/workflows/ci.yml written; needs a green run on GitHub, then pin OSS_CAD_SHA256
+- [Building] exp LUT as block ROM                 (domain: sandbox)  rtl/exp_lut_2p.sv + fpga/exp_lut_2p_xilinx.sv + attention_top PIPE_ROM plumbing; needs make verify (both PIPE_ROM) + Vivado BRAM check
+- [Building] UVM environment (matmul_tile)        (domain: sandbox)  tb/uvm written; needs Vivado xsim: smoke, regress, bug-proof
+- [Building] VHDL port of mac_unit                (domain: sandbox)  rtl_vhdl/mac_unit.vhd + tb/vhdl_mac; needs make vhdl-crosscheck (ghdl + verilator)
+- [Blocked: needs bench] FPGA bring-up (Nexys A7-100T)  (domain: hardware)  fpga/nexys_a7_* + scripts written; make -C fpga hw-gate on the board; PENDING-HARDWARE
 
 ## Phase 7: Physical design + silicon
 - [Todo] openlane RTL-to-GDS on the tile + KLayout screenshot  (domain: sandbox)  guide: docs/phase7_physical_guide.md

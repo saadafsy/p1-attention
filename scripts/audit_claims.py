@@ -8,7 +8,7 @@ pending" passed as clean. This script works per SENTENCE and only accepts a
 prohibited verb when the SAME sentence carries an explicit interim
 qualifier, a negation, or a conditional/instructional framing.
 
-Files audited: guide.md, README.md, docs/uarch.md, docs/benchmark.md,
+Files audited: docs/guide.md, README.md, docs/uarch.md, docs/benchmark.md,
 docs/tradeoffs.md, docs/verification_plan.md (the documents that make
 result claims). The two forward-looking manuals (docs/phase6_fpga_guide.md,
 docs/phase7_physical_guide.md) open with a PENDING banner and are checked
@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 CLAIM_DOCS = [
-    "guide.md", "README.md", "docs/uarch.md", "docs/benchmark.md",
+    "docs/guide.md", "README.md", "docs/uarch.md", "docs/benchmark.md",
     "docs/tradeoffs.md", "docs/verification_plan.md",
 ]
 MANUALS = {
