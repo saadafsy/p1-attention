@@ -1,0 +1,16 @@
+// coverage_pipe_rom1.vlt: verilator coverage config for the PIPE_ROM=1 run
+// of tb/online_softmax ONLY (the default run keeps the ROM instrumented and
+// sweeps it exhaustively in rom_full_sweep).
+//
+// Excludes the generated exp_lut.svh ROM from THIS run's line-coverage
+// instrumentation. Rationale (2026-09-18, review finding M6): the PIPE_ROM=1
+// test module checks latency-2 VALUES against the golden mirror but does
+// not re-sweep all 1024 ROM arms; the committed coverage_pipe_rom1.dat
+// showed 867 of 1048 points unhit, all of them ROM case arms, and the run
+// had no coverage gate at all. The ROM's contents are proven entry for
+// entry in the default run and at TB import time (_check_rom_sources), and
+// the ROM source is identical in both elaborations, so the PIPE_ROM=1 gate
+// measures the g_lat2 logic it is there to measure. Same mechanism as
+// tb/attention_top/coverage.vlt.
+`verilator_config
+coverage_off -file "*/exp_lut.svh"

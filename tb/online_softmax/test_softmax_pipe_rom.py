@@ -181,10 +181,41 @@ class PipeRom1Mirror:
             self.rs_p = row_start
 
 
+def observe_pipe_bins(mirror, rst, in_valid, row_start, pre):
+    """Record the PIPE_ROM=1 structural coverage bins from OBSERVED mirror
+    state (2026-09-18, review finding M7: the bins used to be set by
+    unconditional PIPE_COV.hit() calls at the end of each test, i.e. they
+    were test-ran markers, not coverage). `pre` is the mirror state
+    captured before this clock edge; `mirror` is the state after it."""
+    pre_m, pre_v_p, pre_rs_p, pre_ov = pre
+    if rst and pre_v_p:
+        # an element was in flight (stage 2 pending) when rst hit
+        PIPE_COV.hit("reset_mid_pipe_elements_in_flight")
+    if in_valid and row_start and pre_v_p:
+        # new row's first element enters stage 1 while the previous
+        # element commits in stage 2 on the same edge
+        PIPE_COV.hit("back_to_back_across_stage_boundary")
+    if (not in_valid) and (not rst) and pre_v_p and pre_rs_p:
+        # the row_start element is the one in stage 2 and stage 1 idles
+        PIPE_COV.hit("bubble_immediately_after_row_start_lat2")
+    if pre_ov and not mirror.out_valid:
+        # out_valid falls only when v_p was 0 at the edge, i.e. exactly two
+        # cycles after the last in_valid (uarch.md 8.2.1)
+        PIPE_COV.hit("drain_falls_exactly_2_cycles_after_last_in_valid")
+    if in_valid and not row_start and not rst and mirror.m != pre_m:
+        # a genuine max update committed at latency 1 while out_valid (if
+        # high) still reports an earlier element: m leads out_valid
+        PIPE_COV.hit("m_leads_out_valid_by_one_on_max_update")
+    if mirror.l == (1 << 23):
+        PIPE_COV.hit("den_worst_case_lat2_l_eq_2p23")
+
+
 async def step(dut, mirror, in_valid, row_start, s, msg, rst=False):
     """Drive one cycle (optionally including rst) and check every DUT
     output against the mirror on the following FallingEdge (post-NBA,
-    stable), same house style as test_online_softmax.drive_and_check."""
+    stable), same house style as test_online_softmax.drive_and_check.
+    Also samples the PIPE_ROM=1 coverage bins from observed state."""
+    pre = (mirror.m, mirror.v_p, mirror.rs_p, mirror.out_valid)
     dut.rst.value = int(bool(rst))
     dut.in_valid.value = int(bool(in_valid))
     dut.row_start.value = int(bool(row_start))
@@ -193,6 +224,7 @@ async def step(dut, mirror, in_valid, row_start, s, msg, rst=False):
     mirror.clock(bool(rst), bool(in_valid), bool(row_start), s)
     await FallingEdge(dut.clk)
     check_outputs(dut, mirror, msg)
+    observe_pipe_bins(mirror, bool(rst), bool(in_valid), bool(row_start), pre)
 
 
 async def idle(dut, mirror, n, msg):
@@ -249,7 +281,6 @@ async def back_to_back_rows_across_stage_boundary(dut):
                 dut, mirror, True, i == 0, s, f"b2b row{r_i} elem{i}"
             )
     await idle(dut, mirror, 3, "b2b drain")
-    PIPE_COV.hit("back_to_back_across_stage_boundary")
 
 
 # =============================================================================
@@ -269,7 +300,6 @@ async def gap_patterns(dut):
     # Bubble immediately after row_start.
     await step(dut, mirror, True, True, 500, "gap row-start elem0")
     await idle(dut, mirror, 2, "gap right-after-row-start")
-    PIPE_COV.hit("bubble_immediately_after_row_start_lat2")
     await step(dut, mirror, True, False, 700, "gap elem1")
     await idle(dut, mirror, 1, "gap mid-row single bubble")
     await step(dut, mirror, True, False, -300, "gap elem2")
@@ -334,7 +364,6 @@ async def drain_behavior(dut):
         await step(dut, mirror, False, False, 0, f"drain +{3 + i}: hold")
         assert mirror.out_valid is False
         assert mirror.w == last_w and mirror.r == last_r and mirror.l == last_l
-    PIPE_COV.hit("drain_falls_exactly_2_cycles_after_last_in_valid")
 
 
 # =============================================================================
@@ -369,7 +398,6 @@ async def m_leads_out_valid_by_one(dut):
     # this just re-states the m-vs-out_valid-content distinction explicitly.
     assert bool(dut.out_valid.value) is True, "out_valid now reports elem0, not elem1"
     assert int(dut.w.value) == EXP_ONE, "out_valid content is elem0's w == lut[0]"
-    PIPE_COV.hit("m_leads_out_valid_by_one_on_max_update")
 
     await idle(dut, mirror, 3, "mlead drain")
 
@@ -405,7 +433,6 @@ async def reset_mid_pipe(dut):
     assert mirror.l == 0
     assert mirror.w == 0 and mirror.r == 0
     assert mirror.out_valid is False
-    PIPE_COV.hit("reset_mid_pipe_elements_in_flight")
 
     # A further idle cycle post-reset: nothing should leak out of the
     # flushed pipe (v_p/rs_p/w_p/r_p were all cleared, not just m/l/w/r).
@@ -450,7 +477,6 @@ async def den_worst_case_pipe_rom1(dut):
     assert (mirror.l >> 22) & 0x3, "l bits [23:22] must be nonzero at l == 2^23"
     assert mirror.w == EXP_ONE
     assert int(dut.l.value) == (1 << 23)
-    PIPE_COV.hit("den_worst_case_lat2_l_eq_2p23")
 
 
 # =============================================================================
@@ -493,10 +519,10 @@ async def constrained_random_soak(dut):
     # This test runs last (cocotb 2.x's RegressionManager sorts by stage,
     # stable, so tests within one module run in file-definition order, same
     # house style as test_softmax_coverage.py): dump the aggregated
-    # PIPE_ROM=1 structural coverage report and assert closure. All 6 bins
-    # are hit by earlier tests in THIS file (each test above calls
-    # PIPE_COV.hit exactly once for the corner it directly, deterministically
-    # exercises), so this is a strict pass/fail gate, not a best-effort log.
+    # PIPE_ROM=1 structural coverage report and assert closure. Bins are
+    # recorded by observe_pipe_bins() from mirror state on every step(), so
+    # a directed test that stopped exercising its corner would now show as
+    # a MISS here instead of silently passing.
     text, pct, missed = PIPE_COV.report()
     PIPE_COV_REPORT_PATH.write_text(text)
     cocotb.log.info("\n" + text)

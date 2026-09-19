@@ -70,7 +70,7 @@ CLK_PERIOD_NS = 1_000_000_000.0 / CLK_HZ  # 625.0 ns
 REQUIRED_COMMANDS = {
     "PING", "LOAD_Q", "LOAD_K", "LOAD_V", "SET_NLEN", "RUN",
     "STATUS", "READ_OUT", "READ_CYCLES", "NAK_UNKNOWN", "NAK_BUSY", "RESYNC",
-    "NAK_LOAD_BUSY",
+    "NAK_LOAD_BUSY", "NAK_NLEN_INVALID", "NAK_READ_BUSY",
 }
 EXERCISED = set()  # module-level: shared across every test in this file
 
@@ -730,6 +730,119 @@ async def test_resync_after_desync(dut):
         for col in range(D):
             assert got[row][col] == expected[row][col], (
                 f"post-resync run: row={row} col={col} uart={got[row][col]} "
+                f"golden={expected[row][col]}"
+            )
+
+
+@cocotb.test()
+async def test_set_nlen_invalid_nak(dut):
+    """SET_NLEN validation (guide 6.3.4, added 2026-09-18, review finding
+    L13): a byte that is not a multiple of 4 in [4, 64] must be NAKed and
+    must NOT change the stored value. Proven by setting a valid 8, sending
+    several invalid bytes (each NAKed), then RUN with n=8 data: the run's
+    cycle_count equals the n=8 closed form, which it could not if any
+    invalid byte had been stored (n=6 or 0x84 would give a different nblk)."""
+    await start_and_reset(dut)
+    link = UartTbLink(dut)
+    rng = seeded_rng()
+    n = 8
+    q, k, v = random_qkv(rng, n)
+    await load_qkv(link, q, k, v)
+
+    resp = await do_set_nlen(link, n)
+    assert resp == attn_host.CMD_SET_NLEN
+
+    for bad in (0, 2, 6, 65, 68, 127, 0x84, 0xFF):
+        await link.send_bytes(attn_host.build_set_nlen(bad))
+        resp = await link.recv_byte()
+        EXERCISED.add("SET_NLEN")
+        assert resp == attn_host.RESP_NAK, (
+            f"SET_NLEN {bad:#x}: expected NAK 0x3F, got {resp:#x}"
+        )
+        EXERCISED.add("NAK_NLEN_INVALID")
+
+    # Boundary values that ARE legal must still echo.
+    for good in (4, 64):
+        resp = await do_set_nlen(link, good)
+        assert resp == attn_host.CMD_SET_NLEN, f"SET_NLEN {good}: expected echo, got {resp:#x}"
+    resp = await do_set_nlen(link, n)
+    assert resp == attn_host.CMD_SET_NLEN
+
+    resp = await do_run(link)
+    assert resp == attn_host.CMD_RUN
+    for _ in range(500):
+        st = await do_status(link)
+        if st["done"]:
+            break
+    else:
+        raise TimeoutError("test_set_nlen_invalid_nak: run never completed")
+
+    cyc = await do_read_cycles(link)
+    assert cyc == cycle_formula(n), (
+        f"stored n_len was corrupted by an invalid SET_NLEN: cycles={cyc} != {cycle_formula(n)}"
+    )
+    got = [await do_read_out_row(link, row) for row in range(n)]
+    expected = golden(q, k, v)
+    for row in range(n):
+        for col in range(D):
+            assert got[row][col] == expected[row][col], (
+                f"post-invalid-SET_NLEN run: row={row} col={col} uart={got[row][col]} "
+                f"golden={expected[row][col]}"
+            )
+
+
+@cocotb.test()
+async def test_read_while_busy_nak(dut):
+    """READ_OUT and READ_CYCLES while attention_top is busy must NAK at the
+    command byte (guide 6.3.4, added 2026-09-18, review finding L14): a
+    mid-run READ_OUT would return a mix of old and new rows and a mid-run
+    READ_CYCLES a running counter. For READ_OUT the row byte is NOT
+    consumed (FSM stays in P_CMD), proven by a PING immediately after the
+    NAK answering 0xA5 instead of being swallowed as a row index. After the
+    run completes both commands work and match golden."""
+    await start_and_reset(dut)
+    link = UartTbLink(dut)
+    rng = seeded_rng()
+    n = 64
+    q, k, v = random_qkv(rng, n)
+    await load_qkv(link, q, k, v)
+    resp = await do_set_nlen(link, n)
+    assert resp == attn_host.CMD_SET_NLEN
+    resp = await do_run(link)
+    assert resp == attn_host.CMD_RUN
+    st = await do_status(link)
+    assert st["busy"], "test setup error: expected busy=1 right after RUN accepted"
+
+    # READ_OUT command byte only (deliberately no row byte).
+    await link.send_byte(attn_host.CMD_READ_OUT)
+    resp = await link.recv_byte()
+    assert resp == attn_host.RESP_NAK, f"READ_OUT-while-busy: expected NAK, got {resp:#x}"
+    EXERCISED.add("NAK_READ_BUSY")
+    resp = await do_ping(link)
+    assert resp == attn_host.RESP_PING, "PING after READ_OUT NAK must succeed (no row byte consumed)"
+
+    await link.send_bytes(attn_host.build_read_cycles())
+    resp = await link.recv_byte()
+    assert resp == attn_host.RESP_NAK, f"READ_CYCLES-while-busy: expected NAK, got {resp:#x}"
+    resp = await do_ping(link)
+    assert resp == attn_host.RESP_PING
+
+    for _ in range(2000):
+        st = await do_status(link)
+        if st["done"]:
+            assert not st["busy"]
+            break
+    else:
+        raise TimeoutError("test_read_while_busy_nak: run never completed")
+
+    cyc = await do_read_cycles(link)
+    assert cyc == cycle_formula(n)
+    got = [await do_read_out_row(link, row) for row in range(n)]
+    expected = golden(q, k, v)
+    for row in range(n):
+        for col in range(D):
+            assert got[row][col] == expected[row][col], (
+                f"post-busy-NAK readback: row={row} col={col} uart={got[row][col]} "
                 f"golden={expected[row][col]}"
             )
 

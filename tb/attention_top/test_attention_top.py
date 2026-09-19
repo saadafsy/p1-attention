@@ -3,19 +3,20 @@
 bit-exact golden reference used by tb/online_softmax and model/crosscheck.py.
 No re-derivation of the recurrence here: attn_fixed IS the contract.
 
-Load port: byte-granular synchronous write into q_mem/k_mem/v_mem, addr =
-{row[5:0], col[3:0]} (uarch.md 8.3). Output read port: registered, rd_data
-valid one cycle after rd_addr is presented (out_mem is plain read-through
-register-array storage, no valid flag needed).
+Load port: byte-granular synchronous write into the Q/K/V RAMs (column-
+major word-packed for Q/K, row-major for V; BRAM-inferable single-port
+synchronous memories, uarch.md 8.3), addr = {row[5:0], col[3:0]}. Output
+read port: registered, rd_data valid one cycle after rd_addr is presented
+(out_mem is a row-packed synchronous memory read back byte-granular).
 
-Handshake: start is a one-cycle pulse accepted only while busy = 0; busy
-goes high the cycle AFTER the accepted start edge (the FSM's own state
-register has not yet moved on the start-accept edge itself, so busy must
-still read 0 at that instant -- checked below); done is a registered
-one-cycle pulse, mutually exclusive with busy, coincident with the FSM
-landing back in S_IDLE (uarch.md 8.3, "done implies idle" plus "busy/done
-never both 1"). cycle_count is checked bit-exactly against the closed-form
-formula nblk*(16*nblk+156)+1 every run, not just at n=64.
+Handshake: start is a one-cycle pulse accepted only while busy = 0. The FSM
+samples start on the clock edge and registers S_COMPUTE on that SAME edge,
+so busy already reads 1 on the first cycle after the accepted edge (checked
+in run()); done is a registered one-cycle pulse, mutually exclusive with
+busy, coincident with the FSM landing back in S_IDLE (uarch.md 8.3, "done
+implies idle" plus "busy/done never both 1"). cycle_count is checked
+bit-exactly against the closed-form formula nblk*(16*nblk+156)+1 every run,
+not just at n=64.
 
 Drive on RisingEdge, sample on FallingEdge (post-NBA, stable), same house
 style as tb/matmul_tile and tb/online_softmax. Seed plumbing: every RNG is
@@ -41,6 +42,93 @@ LUT = attn.gen_exp_lut()
 D = attn.D_DIM  # 16, docs/uarch.md section 1
 
 CYCLES_PATH = pathlib.Path(__file__).resolve().parent / "cycles.txt"
+FUNC_COV_PATH = pathlib.Path(__file__).resolve().parent / "func_coverage.txt"
+
+
+class TopCoverage:
+    """Functional coverage for the integration (added 2026-09-18, review
+    finding M6: attention_top had no functional coverage model). Bins are
+    OBSERVED from stimulus and outputs by the helpers below, never set by a
+    bare "this test ran" call. The report is written by the last test in
+    file order (test_zz_coverage_closure) in the TOTAL-line format
+    scripts/check_coverage.py gates with --func."""
+
+    GROUPS = {
+        # every supported group count class: nblk = 1, 2, 3, 4, 5, 8, 9, 16
+        # (12/20/36 are the non-power-of-two counts, review finding L17)
+        "n_len": ["n_4", "n_8", "n_12", "n_16", "n_20", "n_32", "n_36", "n_64"],
+        "control": [
+            "back_to_back_runs_no_reset",
+            "rst_mid_run",
+            "start_while_busy_ignored",
+            "sel3_write_ignored",
+        ],
+        "data": [
+            "input_all_zero", "input_all_max", "input_all_min",
+            "input_v_extremes", "output_eq_127", "output_eq_m128",
+            "output_negative", "output_positive",
+        ],
+        "readback": ["random_order_readback", "repeated_read_stable"],
+    }
+
+    def __init__(self):
+        self.hits = {g: {n: 0 for n in names} for g, names in self.GROUPS.items()}
+
+    def hit(self, group, name):
+        self.hits[group][name] += 1
+
+    def report(self):
+        lines = []
+        total = hit = 0
+        for g, names in self.GROUPS.items():
+            g_hit = sum(1 for n in names if self.hits[g][n] > 0)
+            total += len(names)
+            hit += g_hit
+            lines.append(f"[{g}] {g_hit}/{len(names)} reachable bins hit "
+                         f"({100.0 * g_hit / len(names):.1f}%), 0 documented-unreachable")
+            for n in names:
+                c = self.hits[g][n]
+                lines.append(f"    {'HIT' if c else 'MISS':11s} {g}.{n:28s} hits={c}")
+        pct = 100.0 * hit / total
+        missed = [f"  {g}.{n}" for g, names in self.GROUPS.items()
+                  for n in names if self.hits[g][n] == 0]
+        header = [
+            "attention_top functional coverage report",
+            "seed: %s" % getattr(cocotb, "RANDOM_SEED", "?"),
+            f"TOTAL: {hit}/{total} reachable bins hit ({pct:.1f}%), "
+            f"0 documented-unreachable, {total} bins defined",
+            "",
+        ]
+        tail = ["", "Unhit reachable bins (coverage gap, should be empty at closure):"]
+        tail += missed if missed else ["  (none)"]
+        return "\n".join(header + lines + tail) + "\n", pct, missed
+
+
+COV = TopCoverage()
+
+
+def observe_inputs(q, k, v):
+    flat = [x for m in (q, k, v) for r in m for x in r]
+    if all(x == 0 for x in flat):
+        COV.hit("data", "input_all_zero")
+    if all(x == 127 for x in flat):
+        COV.hit("data", "input_all_max")
+    if all(x == -128 for x in flat):
+        COV.hit("data", "input_all_min")
+    if all(x in (127, -128) for r in v for x in r):
+        COV.hit("data", "input_v_extremes")
+
+
+def observe_outputs(out):
+    flat = [x for r in out for x in r]
+    if any(x == 127 for x in flat):
+        COV.hit("data", "output_eq_127")
+    if any(x == -128 for x in flat):
+        COV.hit("data", "output_eq_m128")
+    if any(x < 0 for x in flat):
+        COV.hit("data", "output_negative")
+    if any(x > 0 for x in flat):
+        COV.hit("data", "output_positive")
 
 
 def seeded_rng():
@@ -109,6 +197,7 @@ async def load_matrices(dut, q, k, v):
     consecutive cycles). addr = {row[5:0], col[3:0]} (uarch.md 8.3)."""
     n = len(q)
     d = len(q[0])
+    observe_inputs(q, k, v)
     dut.we.value = 1
     for row in range(n):
         for col in range(d):
@@ -135,6 +224,7 @@ async def read_out(dut, n, d=D):
     for row in range(n):
         for col in range(d):
             out[row][col] = await read_one(dut, row, col)
+    observe_outputs(out)
     return out
 
 
@@ -147,6 +237,7 @@ async def run(dut, n_len):
     checked bit-exactly against the closed-form formula at the done edge.
     Returns the observed cycle_count."""
     expected_cycles = cycle_formula(n_len)
+    COV.hit("n_len", f"n_{n_len}")
     dut.n_len.value = n_len
     dut.start.value = 1
 
@@ -289,6 +380,8 @@ async def multi_run_no_reset(dut):
         await run(dut, n)
         got = await read_out(dut, n)
         assert_matrix_equal(got, golden(q, k, v), f"multi_run_no_reset case{case_i}")
+        if case_i > 0:
+            COV.hit("control", "back_to_back_runs_no_reset")
 
 
 @cocotb.test()
@@ -325,6 +418,7 @@ async def rst_mid_run(dut):
     assert not bool(dut.busy.value), "rst mid-run must drop busy"
     assert not bool(dut.done.value), "rst mid-run must not assert done"
     assert int(dut.cycle_count.value) == 0, "rst mid-run must clear cycle_count"
+    COV.hit("control", "rst_mid_run")
 
     for _ in range(3):
         await RisingEdge(dut.clk)
@@ -401,6 +495,7 @@ async def write_port_readback(dut):
         f"write_port_readback: repeated read of ({r0},{c0}) unstable or "
         f"wrong: {val_a}, {val_b} vs golden {expected[r0][c0]}"
     )
+    COV.hit("readback", "repeated_read_stable")
 
     read_addrs = [(row, col) for row in range(n) for col in range(D)]
     rng.shuffle(read_addrs)
@@ -410,3 +505,118 @@ async def write_port_readback(dut):
             f"write_port_readback: out[{row}][{col}] rtl={got} "
             f"golden={expected[row][col]} (random-order read)"
         )
+    COV.hit("readback", "random_order_readback")
+
+
+@cocotb.test()
+async def nonpow2_group_counts(dut):
+    """n_len in {12, 20, 36} (nblk = 3, 5, 9): the existing tests only ever
+    used power-of-two group counts, so the kb/rg == nblk_m1 comparisons and
+    the S_DIVIDE -> S_COMPUTE rollover for odd counts were unexercised
+    (added 2026-09-18, review finding L17). Bit-exact compare and cycle
+    formula check (inside run()) for each."""
+    await start_and_reset(dut)
+    rng = seeded_rng()
+    for n in (12, 20, 36):
+        q = [[rng.randint(-128, 127) for _ in range(D)] for _ in range(n)]
+        k = [[rng.randint(-128, 127) for _ in range(D)] for _ in range(n)]
+        v = [[rng.randint(-128, 127) for _ in range(D)] for _ in range(n)]
+        await load_matrices(dut, q, k, v)
+        await run(dut, n)
+        got = await read_out(dut, n)
+        assert_matrix_equal(got, golden(q, k, v), f"nonpow2_group_counts n={n}")
+
+
+@cocotb.test()
+async def start_while_busy_ignored(dut):
+    """A second start pulse (with a DIFFERENT n_len on the port) while a run
+    is in flight must be ignored: the run completes with the cycle count of
+    the ORIGINAL n_len and the original outputs (uarch.md 8.3: start is
+    accepted only when busy = 0; n_len is latched only on the accepted
+    start). Added 2026-09-18, review finding L17."""
+    await start_and_reset(dut)
+    rng = seeded_rng()
+    n = 16
+    q = [[rng.randint(-128, 127) for _ in range(D)] for _ in range(n)]
+    k = [[rng.randint(-128, 127) for _ in range(D)] for _ in range(n)]
+    v = [[rng.randint(-128, 127) for _ in range(D)] for _ in range(n)]
+    await load_matrices(dut, q, k, v)
+    COV.hit("n_len", f"n_{n}")
+
+    dut.n_len.value = n
+    dut.start.value = 1
+    await RisingEdge(dut.clk)
+    dut.start.value = 0
+    for _ in range(50):
+        await RisingEdge(dut.clk)
+    await FallingEdge(dut.clk)
+    assert bool(dut.busy.value), "setup error: expected busy 50 cycles into an n=16 run"
+
+    # Spurious second start with a different n_len on the port.
+    dut.n_len.value = 64
+    dut.start.value = 1
+    await RisingEdge(dut.clk)
+    dut.start.value = 0
+    dut.n_len.value = n
+
+    expected_cycles = cycle_formula(n)
+    for _ in range(expected_cycles + 300):
+        await RisingEdge(dut.clk)
+        await FallingEdge(dut.clk)
+        assert not (bool(dut.busy.value) and bool(dut.done.value))
+        if bool(dut.done.value):
+            got_cycles = int(dut.cycle_count.value)
+            assert got_cycles == expected_cycles, (
+                f"start-while-busy was NOT ignored: cycle_count={got_cycles} != "
+                f"{expected_cycles} for the original n_len={n}"
+            )
+            break
+    else:
+        raise TimeoutError("start_while_busy_ignored: run did not complete")
+    COV.hit("control", "start_while_busy_ignored")
+    got = await read_out(dut, n)
+    assert_matrix_equal(got, golden(q, k, v), "start_while_busy_ignored: outputs")
+
+
+@cocotb.test()
+async def sel3_write_ignored(dut):
+    """sel = 3 is the documented no-write encoding of the load port
+    (uarch.md 8.3). After loading Q/K/V, every address is written again
+    with sel = 3 and random garbage; the run must still match the golden
+    output of the ORIGINAL matrices. Added 2026-09-18, review finding L17."""
+    await start_and_reset(dut)
+    rng = seeded_rng()
+    n = 8
+    q = [[rng.randint(-128, 127) for _ in range(D)] for _ in range(n)]
+    k = [[rng.randint(-128, 127) for _ in range(D)] for _ in range(n)]
+    v = [[rng.randint(-128, 127) for _ in range(D)] for _ in range(n)]
+    await load_matrices(dut, q, k, v)
+
+    dut.we.value = 1
+    dut.sel.value = 3
+    for row in range(n):
+        for col in range(D):
+            dut.addr.value = (row << 4) | col
+            dut.wdata.value = rng.randint(0, 255)
+            await RisingEdge(dut.clk)
+    dut.we.value = 0
+    dut.sel.value = 0
+    await RisingEdge(dut.clk)
+    COV.hit("control", "sel3_write_ignored")
+
+    await run(dut, n)
+    got = await read_out(dut, n)
+    assert_matrix_equal(got, golden(q, k, v), "sel3_write_ignored: sel=3 must not write")
+
+
+@cocotb.test()
+async def test_zz_coverage_closure(dut):
+    """Must be the LAST test in this file (cocotb 2.x runs tests in
+    file-definition order, see tb/online_softmax/test_softmax_coverage.py).
+    Dumps the functional coverage report scripts/check_coverage.py gates and
+    fails if any reachable bin is unhit."""
+    text, pct, missed = COV.report()
+    FUNC_COV_PATH.write_text(text)
+    dut._log.info("\n" + text)
+    assert not missed, f"attention_top functional coverage NOT closed: {missed}"
+    assert pct == 100.0, f"coverage {pct:.1f}% != 100%"

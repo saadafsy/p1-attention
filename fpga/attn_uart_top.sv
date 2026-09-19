@@ -16,9 +16,13 @@
 //   P_LROW   LOAD_Q/K/V: await the row-index byte
 //   P_LDATA  LOAD_Q/K/V: 16 data bytes; each rx_valid pulses we into
 //            attention_top's sel/addr/wdata/we load port at {row, col}
-//   P_NLEN   SET_NLEN: await the n_len byte (stored, sampled by the core
-//            only at start; contract: multiple of 4 in [4, 64])
-//   P_OROW   READ_OUT: await the row-index byte
+//   P_NLEN   SET_NLEN: await the n_len byte; stored only if it is a
+//            multiple of 4 in [4, 64] (echo), otherwise NAK and unchanged
+//            (2026-09-18, review finding L13: an unvalidated byte used to
+//            launch a ~6600-cycle run over unwritten RAM)
+//   P_OROW   READ_OUT: await the row-index byte (NAK at the command byte
+//            while busy: out_mem is being written by the run in flight;
+//            READ_CYCLES likewise NAKs while busy, review finding L14)
 //   P_OPIPE  READ_OUT: one dead cycle matching rd_data's registered
 //            1-cycle latency (rd_addr is held combinationally from
 //            row_reg/col_cnt, so one cycle after col_cnt changes rd_data
@@ -44,11 +48,11 @@ module attn_uart_top #(
   localparam logic [7:0] CmdLoadQ = 8'h51;  // 'Q' [row][16 bytes] -> echo, or NAK if busy
   localparam logic [7:0] CmdLoadK = 8'h4B;  // 'K' [row][16 bytes] -> echo, or NAK if busy
   localparam logic [7:0] CmdLoadV = 8'h56;  // 'V' [row][16 bytes] -> echo, or NAK if busy
-  localparam logic [7:0] CmdNlen = 8'h4E;  // 'N' [n_len] -> echo
+  localparam logic [7:0] CmdNlen = 8'h4E;  // 'N' [n_len] -> echo, or NAK if out of contract
   localparam logic [7:0] CmdRun = 8'h52;  // 'R' -> echo, or NAK if busy
   localparam logic [7:0] CmdStatus = 8'h53;  // 'S' -> {6'b0, done_latch, busy}
-  localparam logic [7:0] CmdRead = 8'h4F;  // 'O' [row] -> 16 bytes
-  localparam logic [7:0] CmdCycles = 8'h43;  // 'C' -> 4 bytes LE
+  localparam logic [7:0] CmdRead = 8'h4F;  // 'O' [row] -> 16 bytes, or NAK if busy
+  localparam logic [7:0] CmdCycles = 8'h43;  // 'C' -> 4 bytes LE, or NAK if busy
   localparam logic [7:0] RespPing = 8'hA5;
   localparam logic [7:0] RespNak = 8'h3F;  // '?'
 
@@ -281,12 +285,26 @@ module attn_uart_top #(
                 state    <= P_SEND;
               end
               CmdRead: begin
-                state <= P_OROW;
+                // out_mem is written row by row during the run; a mid-run
+                // read would return a mix of old and new rows. NAK instead.
+                if (attn_busy) begin
+                  resp_reg <= RespNak;
+                  state    <= P_SEND;
+                end else begin
+                  state <= P_OROW;
+                end
               end
               CmdCycles: begin
-                cc_snap <= attn_cycle_count;
-                cc_idx  <= '0;
-                state   <= P_CSEND;
+                // cycle_count is final only once idle; NAK while busy so a
+                // host cannot mistake a running counter for the run length.
+                if (attn_busy) begin
+                  resp_reg <= RespNak;
+                  state    <= P_SEND;
+                end else begin
+                  cc_snap <= attn_cycle_count;
+                  cc_idx  <= '0;
+                  state   <= P_CSEND;
+                end
               end
               default: begin
                 resp_reg <= RespNak;  // unknown command (guide 6.3.4)
@@ -315,8 +333,17 @@ module attn_uart_top #(
 
         P_NLEN: begin
           if (rx_valid) begin
-            n_len_reg <= rx_byte[6:0];
-            state     <= P_SEND;
+            // Contract (uarch.md 8.3): multiple of 4 in [4, 64]. Bits [1:0]
+            // must be 0, bits [6:2] (the block count) in [1, 16]; bit 7 of
+            // the wire byte is ignored by the 7-bit port and rejected here.
+            if (rx_byte[7] == 1'b0 && rx_byte[1:0] == 2'b00 &&
+                rx_byte[6:2] != 5'd0 && rx_byte[6:2] <= 5'd16) begin
+              n_len_reg <= rx_byte[6:0];
+              // resp_reg already holds the echo (set at the command byte)
+            end else begin
+              resp_reg <= RespNak;  // stored value unchanged
+            end
+            state <= P_SEND;
           end
         end
 

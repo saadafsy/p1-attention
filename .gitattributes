@@ -1,0 +1,18 @@
+# Normalize line endings so byte-exact checks (the sha256 pin on
+# model/exp_lut.hex, verilator/sby include parsing, bash hooks) behave the
+# same on every checkout. Added 2026-09-18 (review finding M5): with
+# core.autocrlf=true the LUT hex checked out as CRLF and every
+# online_softmax test failed at import on the pin check.
+* text=auto eol=lf
+*.sh   text eol=lf
+*.py   text eol=lf
+*.tcl  text eol=lf
+*.sv   text eol=lf
+*.svh  text eol=lf
+*.v    text eol=lf
+*.sby  text eol=lf
+*.hex  text eol=lf
+*.md   text eol=lf
+Makefile text eol=lf
+*.dat  binary
+*.vcd  binary

@@ -1,9 +1,8 @@
 # cocotb testbench for attn_uart_top (Phase 6 bring-up kit, outside the core
 # verify flow: this directory is never referenced by the root Makefile or
-# scripts/check_coverage.py). No verilator --coverage here on purpose (see
-# test_fpga_uart.py docstring): a coverage.dat written here would be picked
-# up by scripts/check_coverage.py's recursive **/coverage.dat glob and skew
-# the core gate with an unrelated line count.
+# scripts/check_coverage.py, whose --module scoping only ever reads
+# tb/<module>/). No verilator --coverage here: the protocol coverage is the
+# set-based command-class closure check in test_fpga_uart.py.
 #
 # CLK_HZ/BAUD are overridden to the SMALLEST ratio the elaboration-time check
 # in fpga/uart_rx.sv / fpga/uart_tx.sv allows (CLK_HZ/BAUD >= 16, guide

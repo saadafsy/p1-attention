@@ -1,11 +1,16 @@
 # Phase 6: FPGA prototype on the Basys 3 (complete beginner guide)
 
-STATUS: NOTHING IN THIS DOCUMENT HAS BEEN EXECUTED. This is a forward-looking
-instruction guide. Every result described here is PENDING-HARDWARE until you
-run it on the physical board and record bench evidence (photo/video, ILA
-captures, the timing report) in EVIDENCE.md. Until then the only honest claim
-remains: verified in simulation and formal; synthesized to a latch-free
-netlist; not implemented on FPGA.
+STATUS: NOTHING IN THIS DOCUMENT HAS BEEN EXECUTED ON HARDWARE. The bring-up
+kit in fpga/ exists, lints, elaborates latch-free in yosys, and is verified in
+cocotb simulation against the golden model (section 6.3.6, EVIDENCE rows
+fpga-kit-sim and the two audit-fpga-kit rows); nothing has been synthesized
+in Vivado, programmed, or measured on a board. Every on-board result
+described here is PENDING-HARDWARE until you run it on the physical board
+and record bench evidence (photo/video, ILA captures, the timing report) in
+EVIDENCE.md. Until then the only honest claim remains: verified in
+simulation and formal; synthesized to a latch-free netlist; not implemented
+on FPGA. (Wording tightened 2026-09-18, review finding F008/L3: the earlier
+banner said nothing at all had been executed, which contradicted 6.3.6.)
 
 Audience: you have used Quartus but never Vivado. Differences are called out
 explicitly. Time budget: one weekend for tool install + first bitstream, one
@@ -60,7 +65,7 @@ compute block and it fits with enormous headroom:
 | DSP48E1 | 90 | up to 16 (one per 8x8 multiply; synth may LUT them) |
 | BRAM36 | 50 | 0 |
 
-A trimmed attention_top (once it exists and is verified) also fits: the exp
+attention_top (verified, EVIDENCE.md) also fits as attn_uart_top: the exp
 ROM is 2 KB (one BRAM18 or distributed LUTROM), the softmax multiplier maps
 to 1 or 2 DSPs, the PV array to ~32 DSPs. Do the tile first anyway: fewer
 moving parts on first bring-up.
@@ -184,11 +189,11 @@ script must follow it exactly.
 
 ### 6.3 The shipped bring-up RTL (fpga/)
 
-STATUS: the files below exist in the repo and pass verilator -Wall lint and
-yosys generic elaboration (latch-free) at the time of writing. Nothing in
-fpga/ has been synthesized in Vivado, simulated as a full system testbench,
-or run on a board. Every on-hardware behavior described here stays
-PENDING-HARDWARE per section 10. The core verify flow (Makefile
+STATUS: the files below exist in the repo, pass verilator -Wall lint and
+yosys generic elaboration (latch-free), and are verified in cocotb
+simulation as a full system testbench (6.3.6). Nothing in fpga/ has been
+synthesized in Vivado or run on a board. Every on-hardware behavior
+described here stays PENDING-HARDWARE per section 10. The core verify flow (Makefile
 SRC := rtl/*.sv) never sees fpga/: these files live outside the
 countersigned rtl/ tree and instantiate it unmodified.
 
@@ -338,11 +343,11 @@ never needs to guess timing: run completion is observed by polling STATUS.
 | 0x51 'Q' | LOAD_Q | [row][16 data bytes] | 0x51 (after byte 16); 0x3F immediately if busy | writes Q row, cols 0..15; if busy at the command byte, NAK and NO further bytes are consumed (FSM stays in command state) |
 | 0x4B 'K' | LOAD_K | [row][16 data bytes] | 0x4B (after byte 16); 0x3F immediately if busy | writes K row, cols 0..15; if busy at the command byte, NAK and NO further bytes are consumed (FSM stays in command state) |
 | 0x56 'V' | LOAD_V | [row][16 data bytes] | 0x56 (after byte 16); 0x3F immediately if busy | writes V row, cols 0..15; if busy at the command byte, NAK and NO further bytes are consumed (FSM stays in command state) |
-| 0x4E 'N' | SET_NLEN | [n_len byte] | 0x4E | stores n_len[6:0]; must be a multiple of 4 in [4, 64] |
+| 0x4E 'N' | SET_NLEN | [n_len byte] | 0x4E if valid; 0x3F otherwise | stores the byte only if it is a multiple of 4 in [4, 64] (bit 7 clear, bits 1:0 zero, bits 6:2 in 1..16); anything else is NAKed and the stored value is unchanged (2026-09-18) |
 | 0x52 'R' | RUN | nothing | 0x52 if started, 0x3F if busy | pulses attention_top start; clears the done latch |
 | 0x53 'S' | STATUS | nothing | 1 status byte | see status table below |
-| 0x4F 'O' | READ_OUT | [row] | 16 data bytes, col 0 first | reads output row (ACT Q1.6) |
-| 0x43 'C' | READ_CYCLES | nothing | 4 bytes, little-endian | cycle_count snapshot taken at the command byte |
+| 0x4F 'O' | READ_OUT | [row] | 16 data bytes, col 0 first; 0x3F immediately if busy | reads output row (ACT Q1.6); while busy, NAK at the command byte and the row byte is NOT consumed (2026-09-18) |
+| 0x43 'C' | READ_CYCLES | nothing | 4 bytes, little-endian; 0x3F if busy | cycle_count snapshot taken at the command byte, only when idle (2026-09-18) |
 | other | unknown | n/a | 0x3F NAK | ignored; FSM stays in command state |
 
 Status byte:
@@ -371,11 +376,19 @@ Error behavior, all of it:
 - SET_NLEN deliberately remains accepted while busy: it is harmless, because
   attention_top latched nblk_reg from n_len at the start pulse, so changing
   the stored value mid-run cannot affect the run in flight.
-- SET_NLEN does not validate: the stored value feeds attention_top's n_len
-  input directly and is sampled by the core only at the start pulse. Sending
-  a value that is not a multiple of 4 in [4, 64] violates the 8.3 contract
-  and gives undefined results, exactly as in simulation. After reset the
+- SET_NLEN validates (2026-09-18, review finding L13; before that an
+  out-of-contract byte launched a ~6600-cycle run over unwritten RAM): a
+  byte that is not a multiple of 4 in [4, 64] is NAKed and the stored value
+  is unchanged. The stored value feeds attention_top's n_len input directly
+  and is sampled by the core only at the start pulse. After reset the
   stored default is 16; well-behaved hosts always SET_NLEN explicitly.
+- READ_OUT and READ_CYCLES while busy: NAK at the command byte, no row byte
+  consumed (2026-09-18, review finding L14). A mid-run READ_OUT would return
+  a mix of old and new rows and a mid-run READ_CYCLES a running counter;
+  poll STATUS until done first. fpga/host/attn_host.py raises on the NAK
+  rather than mis-parsing it as data. Verified in simulation:
+  tb/fpga_uart/test_fpga_uart.py's test_set_nlen_invalid_nak and
+  test_read_while_busy_nak (added 2026-09-18, not yet run).
 - UART framing error: the byte is dropped before the protocol FSM sees it,
   which desynchronizes any in-flight multi-byte command. A framing error
   does not always mean silence, though: if the offending low period
@@ -464,7 +477,8 @@ with a $_DLATCH_ grep; verible-verilog-lint on fpga/.
 Also checked now, in simulation (fixed seed, COCOTB_RANDOM_SEED=1 and 7,
 exit 0 both): cocotb testbenches exist for BOTH fpga/ tops.
 tb/fpga_uart (attn_uart_top around the full, unmodified attention_top; 9
-tests, ClksPerBit=16 sim-speed override, see that Makefile) covers PING,
+tests at the last run, 11 after the 2026-09-18 additions which are not yet
+run; ClksPerBit=16 sim-speed override, see that Makefile) covers PING,
 LOAD_Q/K/V, SET_NLEN, RUN, STATUS, READ_OUT, and READ_CYCLES bit-exactly
 against model/attn.py attn_fixed; NAK-on-unknown-command; NAK-on-RUN-while-
 busy; NAK-on-LOAD-while-busy (rejected at the command byte, FSM proven
@@ -551,7 +565,7 @@ Device > select the .bit. The DONE LED lights when configuration succeeds.
 | Design totally dead, heartbeat LED off | Clock not toggling (wrong pin, W5 typo), or reset stuck: check the button polarity and your synchronizer |
 | ILA never triggers | Trigger condition wrong, or clr/en never asserted: probe the FSM state too, trigger on state changes |
 | ILA shows garbage/X-like values | Reset never released, ROM include misconfigured (softmax builds), or you probed pre-synth names that got renamed: use (* mark_debug = "true" *) on nets you must keep |
-| UART prints garbage | Baud divisor arithmetic (868, not 867), missing 2-FF synchronizer on uart_rx, byte order confusion on the 24-bit words |
+| UART prints garbage | Baud divisor arithmetic (868, not 867), missing 2-FF synchronizer on uart_rx, little-endian byte order on the 4-byte cycle count |
 | Works in sim, wrong numbers on board | Uninitialized RAM/regs (Verilator is 2-state and forgiving; hardware is not: check every FF has reset), a real CDC (button/UART inputs not synchronized), or timing failure you ignored |
 | Random wrong answers, temperature/touch dependent | You ignored WNS < 0. Fix timing; never ship a failing-timing bitstream as "working" |
 

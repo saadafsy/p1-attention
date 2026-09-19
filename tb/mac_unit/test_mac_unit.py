@@ -6,7 +6,13 @@ wrap. In-spec dot products (length <= 511) never wrap (uarch.md 3.2); the
 wrap tests exist to pin the register width, not to bless overflow as a
 feature.
 
-Drive on RisingEdge, sample on FallingEdge (post-NBA, stable)."""
+Drive on RisingEdge, sample on FallingEdge (post-NBA, stable).
+
+Seed plumbing (2026-09-18, review finding L4/F005): the random tests used
+fixed literals random.Random(2)/(3), so the Makefile's SEED never changed
+this module's stimulus and the "two seeds" audit re-run repeated identical
+vectors. Every RNG is now built from cocotb.RANDOM_SEED via seeded_rng(),
+the house style of every later testbench."""
 
 import random
 
@@ -17,6 +23,15 @@ from cocotb.triggers import FallingEdge, RisingEdge
 ACC_W = 24
 ACC_MOD = 1 << ACC_W
 ACC_MAX = (1 << (ACC_W - 1)) - 1
+
+
+def seeded_rng(salt=0):
+    """RNG from cocotb's per-test seed (see module docstring); `salt` keeps
+    two RNGs in one test from replaying each other's sequence."""
+    seed = getattr(cocotb, "RANDOM_SEED", None)
+    if seed is None:
+        seed = 1  # defensive fallback only; COCOTB_RANDOM_SEED is always set
+    return random.Random(seed + salt)
 
 
 def wrap24(x):
@@ -100,7 +115,7 @@ async def dot_products_vs_golden(dut):
     """200 random D=16 dot products, exactly the golden model's SACC loop
     (model/attn.py attn_fixed inner loop), back to back with no dead cycle."""
     await start_and_reset(dut)
-    rng = random.Random(2)
+    rng = seeded_rng()
     for trial in range(200):
         qv = [rng.randint(-128, 127) for _ in range(16)]
         kv = [rng.randint(-128, 127) for _ in range(16)]
@@ -164,7 +179,7 @@ async def random_control_fuzz(dut):
     """2000 cycles of fully random data and control vs the mirror, checked
     every cycle (catches en/clr priority and hold bugs)."""
     await start_and_reset(dut)
-    rng = random.Random(3)
+    rng = seeded_rng(1)
     mirror = MacMirror()
     for cycle in range(2000):
         rst = rng.random() < 0.02

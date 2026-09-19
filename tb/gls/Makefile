@@ -15,7 +15,8 @@
 #      after `endif is rejected by iverilog)
 #   2. UNIT_DELAY defined empty (the models leave it undefined; empty is the
 #      zero-delay functional intent)
-CELLS_SRC := $(HOME)/tools/oss-cad-suite/examples/eqy/spm
+# Override on the command line: make CELLS_SRC=<dir with the PDK cell models>
+CELLS_SRC ?= $(HOME)/tools/oss-cad-suite/examples/eqy/spm
 REPO      := $(abspath ../..)
 BUILD     := $(REPO)/build
 CELLS     := $(BUILD)/gls_cells
@@ -28,7 +29,11 @@ all: lat1 lat2
 
 cells: $(CELLS)/sky130_fd_sc_hd.v
 
-$(CELLS)/sky130_fd_sc_hd.v: $(CELLS_SRC)/sky130_fd_sc_hd.v $(CELLS_SRC)/primitives.v
+# No file prerequisites on the PDK sources: with them, a missing CELLS_SRC
+# died in make's "No rule to make target" before any message could say
+# which variable to set (2026-09-18, review finding L12).
+$(CELLS)/sky130_fd_sc_hd.v:
+	@test -f "$(CELLS_SRC)/sky130_fd_sc_hd.v" -a -f "$(CELLS_SRC)/primitives.v" || { echo "CELLS_SRC=$(CELLS_SRC): sky130_fd_sc_hd.v/primitives.v not found; set CELLS_SRC=<dir with the PDK cell models> (README, Toolchain paths)"; exit 1; }
 	mkdir -p $(CELLS)
 	sed -E 's/^(`endif)[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*$$/\1 \/\/ \2/' \
 	  $(CELLS_SRC)/sky130_fd_sc_hd.v > $(CELLS)/sky130_fd_sc_hd.v

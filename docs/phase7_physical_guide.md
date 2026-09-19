@@ -86,9 +86,11 @@ Notes:
 - online_softmax needs the include to resolve: add
   "VERILOG_INCLUDE_DIRS": ["dir::../.."] so `include "rtl/exp_lut.svh"`
   works, exactly like the +incdir in the cocotb flow.
-- attention_top hardening is a later exercise: its RAM arrays will synthesize
-  to DFF-RAM (huge but legal) unless you map them to sky130 SRAM macros;
-  that is an advanced step, not first-run material.
+- attention_top hardening is a later exercise: its four memories are written
+  in the BRAM-inference idiom (docs/uarch.md 8.3) but OpenLane has no
+  block RAM, so they synthesize to DFF-RAM (huge but legal) unless you map
+  them to sky130 SRAM macros; that is an advanced step, not first-run
+  material.
 
 Run:
 

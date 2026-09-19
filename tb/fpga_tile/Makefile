@@ -1,8 +1,8 @@
 # cocotb testbench for tile_runner (Phase 6 first-bring-up helper, outside
 # the core verify flow). Fixed-function block, one directed test is enough
 # (guide 6.3.5 documents the exact stimulus and expected accumulators). No
-# verilator --coverage here (same rationale as tb/fpga_uart/Makefile: keep
-# coverage.dat out of scripts/check_coverage.py's recursive glob).
+# verilator --coverage here (outside the core verify flow; check_coverage.py
+# only reads tb/<module>/ for the module it is asked about).
 SIM ?= verilator
 TOPLEVEL_LANG ?= verilog
 

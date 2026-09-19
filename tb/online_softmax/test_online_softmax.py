@@ -89,7 +89,11 @@ def _check_rom_sources():
     assert hex_lut == LUT, (
         "model/exp_lut.hex diverges from model/attn.py gen_exp_lut()"
     )
-    digest = hashlib.sha256(HEX_PATH.read_bytes()).hexdigest()
+    # Hash LF-normalized bytes: the pin is over the canonical LF file
+    # (.gitattributes enforces LF, but a CRLF checkout must not turn a
+    # correct table into a false pin failure; 2026-09-18 review finding M5).
+    canonical = HEX_PATH.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    digest = hashlib.sha256(canonical).hexdigest()
     assert digest == PINNED_SHA256, (
         f"model/exp_lut.hex sha256 {digest} != pinned {PINNED_SHA256} "
         "(docs/uarch.md 3.5)"

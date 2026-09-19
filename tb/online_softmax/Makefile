@@ -22,8 +22,8 @@ COCOTB_TOPLEVEL = online_softmax
 # PIPE_ROM config knob (Phase 4, docs/uarch.md 8.2.1). Default 0 = today's
 # invocation, byte-for-byte: same COCOTB_TEST_MODULES, same SIM_BUILD
 # (sim_build), same COCOTB_RESULTS_FILE (results.xml), same coverage.dat
-# path -- these are exactly the artifacts scripts/check_coverage.py's
-# `**/coverage.dat` glob and EVIDENCE.md's func_coverage.txt reference, so
+# path -- these are exactly the artifacts scripts/check_coverage.py
+# --module online_softmax and EVIDENCE.md's func_coverage.txt reference, so
 # `make verify` / `make coverage` must see them unchanged.
 #
 # PIPE_ROM=1 elaborates the registered-ROM (latency-2) variant via a
@@ -43,6 +43,10 @@ SIM_BUILD ?= sim_build_pipe_rom1
 COCOTB_RESULTS_FILE ?= results_pipe_rom1.xml
 EXTRA_ARGS += -GPIPE_ROM=1
 COCOTB_PLUSARGS += +verilator+coverage+file+coverage_pipe_rom1.dat
+# ROM excluded from this run's instrumentation; gated by
+# `make coverage MODULE=online_softmax PIPE_ROM=1` at the repo root
+# (see coverage_pipe_rom1.vlt for the rationale).
+VERILOG_SOURCES := $(PWD)/coverage_pipe_rom1.vlt $(VERILOG_SOURCES)
 else
 COCOTB_TEST_MODULES = test_online_softmax,test_softmax_coverage
 endif

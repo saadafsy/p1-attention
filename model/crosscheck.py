@@ -9,6 +9,7 @@ Exit 0 only if: cpp builds, every case is byte-exact between py and cpp, and
 every case meets the float-error gate.
 """
 
+import hashlib
 import pathlib
 import random
 import subprocess
@@ -23,6 +24,7 @@ LUT_HEX = ROOT / "model" / "exp_lut.hex"
 CPP_SRC = ROOT / "model" / "attn.cpp"
 CPP_BIN = BUILD / "attn_cpp"
 FLOAT_GATE_LSB = 6  # docs/uarch.md section 7
+PINNED_SHA256 = "541676bde3a2a703ec0e021960eed77a1806f6182cd4a8d48803e57302e84ba5"  # docs/uarch.md 3.5
 
 D = attn.D_DIM
 
@@ -77,8 +79,28 @@ def write_stimulus(path, q, k, v):
 def main():
     BUILD.mkdir(parents=True, exist_ok=True)
 
-    # 1. Emit the normative LUT (single source; cpp consumes this file).
-    attn.emit_lut(LUT_HEX)
+    # 1. VERIFY the tracked normative LUT (single source; cpp consumes this
+    #    file). The generator's output goes to build/ and is compared, value
+    #    for value and by sha256, against the tracked file and the pin in
+    #    docs/uarch.md 3.5. The check used to OVERWRITE model/exp_lut.hex
+    #    on every run, so the sha256 pin was never actually checked here
+    #    and a checker run mutated a tracked file (2026-09-18 review
+    #    finding M5). Regenerate deliberately with
+    #    `python3 model/attn.py --emit-lut model/exp_lut.hex`.
+    gen_hex = BUILD / "exp_lut.generated.hex"
+    attn.emit_lut(gen_hex)
+    tracked = LUT_HEX.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    generated = gen_hex.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    if tracked != generated:
+        print(f"CROSSCHECK FAIL: tracked {LUT_HEX} differs from the generator output "
+              f"({gen_hex}); regenerate deliberately if the spec changed")
+        return 1
+    digest = hashlib.sha256(tracked).hexdigest()
+    if digest != PINNED_SHA256:
+        print(f"CROSSCHECK FAIL: sha256({LUT_HEX}) = {digest} != pinned {PINNED_SHA256} "
+              "(docs/uarch.md 3.5)")
+        return 1
+    print(f"exp LUT verified: {LUT_HEX} == generator output, sha256 matches pin")
 
     # 2. Build the C++ model. Asserts stay on: no -DNDEBUG.
     cmd = ["g++", "-O2", "-std=c++17", "-Wall", "-Wextra",
