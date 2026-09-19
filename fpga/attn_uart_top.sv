@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 // attn_uart_top: Phase 6 UART demo top (docs/phase6_fpga_guide.md 6.2/6.3).
-// Wraps attention_top (rtl/attention_top.sv, UNMODIFIED, no parameters)
+// Wraps attention_top (rtl/attention_top.sv, UNMODIFIED, PIPE_ROM = 1)
 // with an 8N1 UART (115200 default) command protocol so a pyserial host
 // script can load Q/K/V, set n_len, run, poll status, and read the output
 // and cycle count back. NORMATIVE protocol: guide section 6.3.4; command
@@ -166,7 +166,12 @@ module attn_uart_top #(
   // active in any state, so sharing is safe).
   assign attn_we = (state == P_LDATA) && rx_valid;
 
-  attention_top u_attn (
+  // PIPE_ROM = 1: registered-ROM softmax lanes (one block RAM per lane
+  // under `define XILINX_FPGA), the timing configuration of uarch.md
+  // 8.2.1; attention_top absorbs the extra cycle internally (2026-09-19).
+  attention_top #(
+      .PIPE_ROM(1'b1)
+  ) u_attn (
       .clk        (clk),
       .rst        (rst),
       .sel        (sel_reg),

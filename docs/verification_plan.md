@@ -1,6 +1,6 @@
 # Verification plan: Streaming Attention Engine
 
-Status of this document: Phase 5 deliverable (P1_Attention_Engine_Build_Sheet.md,
+Status of this document: Phase 5 deliverable (process/P1_Attention_Engine_Build_Sheet.md,
 PHASE 5), retroactively formalized, refreshed 2026-09-18 to the ledger state (the
 previous revision still described attention_top as unverified and the exact-max
 property as planned; review finding M3/F006). All four RTL modules have verify-green
@@ -320,7 +320,7 @@ not for the done-based ones at the depth then used (see 5.2 and the EVIDENCE err
   paper derivation, checked at runtime by an assert in both golden models, and pinned
   by a directed simulation test that walks up to the exact width-wrap boundary (for
   example mac_unit's 511-term/512-term test and matmul_tile's derived 517-term
-  24-bit-wrap crossing, guide.md section 5.4). No `.sby` file in formal/ currently
+  24-bit-wrap crossing, docs/guide.md section 5.4). No `.sby` file in formal/ currently
   contains a BMC induction property that proves the exact numeric boundary itself
   (for example, that `l_raw <= j * 2^15` holds for all reachable `j`, or that the
   384-bit accumulator bus can never reach the exact overflow value for any reachable

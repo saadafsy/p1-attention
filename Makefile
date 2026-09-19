@@ -15,7 +15,7 @@ SHELL       := /bin/bash
 # Every target here is a command, not a file. Without this, the formal/
 # directory shadows the formal target (make says "up to date" and silently
 # skips sby inside make verify). Found 2026-07-16 during Phase 4.
-.PHONY: lint sim coverage synth-check formal verify verify-fw synth-netlist synth-netlist-pipe1 sta sta-pipe1 gls model-check audit-guide evidence-snapshot check-lib
+.PHONY: lint sim coverage synth-check formal verify verify-fw record-verify synth-netlist synth-netlist-pipe1 sta sta-pipe1 sta-top gls model-check audit-guide evidence-snapshot check-lib diagrams perl-crosscheck vhdl-crosscheck
 
 # Unique, immutable EVIDENCE.md row ids: the ledger is append-only and the
 # same logical id used to be appended many times, so a citation could not
@@ -58,10 +58,19 @@ synth-check:
 formal:
 	sby -f formal/$(MODULE).sby
 
-verify-fw verify: lint sim coverage synth-check formal
+# VERIFY_NO_LEDGER=1 (CI) runs the identical gate but does not append to
+# EVIDENCE.md, so a hosted runner never mutates the checkout; the ledger row
+# is appended only by a run on a machine whose result the owner commits.
+verify-fw verify: lint sim coverage synth-check formal record-verify
+
+record-verify:
+ifeq ($(VERIFY_NO_LEDGER),1)
+	@echo "VERIFY OK: $(MODULE) (ledger row suppressed, VERIFY_NO_LEDGER=1)"
+else
 	@mkdir -p build
 	@echo "| verify-$(MODULE)-$(STAMP) | $(MODULE) passes lint/sim/cov/synth/formal | PASS | make verify MODULE=$(MODULE) SEED=$(SEED) | 0 |" >> EVIDENCE.md
 	@echo "VERIFY OK: $(MODULE)" | tee -a EVIDENCE.md
+endif
 
 # Phase 4: map to sky130 cells and run OpenSTA. PERIOD_NS is the target.
 # LIB has no sane machine-independent default; override it or stage the
@@ -77,7 +86,7 @@ synth-netlist: check-lib
 	yosys -p 'read_verilog -sv $(SRC); hierarchy -top $(MODULE); synth -top $(MODULE); dfflibmap -liberty $(LIB); abc -liberty $(LIB); opt_clean; stat -liberty $(LIB); write_verilog -noattr build/$(MODULE)_netlist.v' 2>&1 | tee build/synth_netlist_$(MODULE).log
 
 # The PIPE_ROM=1 online_softmax netlist that tb/gls needs. This used to be a
-# hand-typed yosys command in guide.md section 12 only, so README's
+# hand-typed yosys command in docs/guide.md section 12 only, so README's
 # `make -C tb/gls all` was not runnable in order (review finding M4).
 synth-netlist-pipe1: check-lib
 	@mkdir -p build
@@ -93,6 +102,16 @@ sta-pipe1: check-lib
 	LIB=$(LIB) NETLIST=build/online_softmax_pipe1_netlist.v MODULE=online_softmax PERIOD_NS=$(PERIOD_NS) \
 	  opensta -no_init scripts/sta.tcl 2>&1 | tee build/sta_online_softmax_pipe1.log
 
+# Top-level STA (2026-09-19, target-scores change 3): synthesize the whole
+# engine to sky130 cells and time it, then summarize WNS/TNS, the worst
+# path's start/end points and which block owns it. The memories flatten to
+# flip-flop RAM in this standard-cell flow (no SRAM macro is modeled), so
+# the result is labeled "flattened standard-cell estimate" by the summary.
+sta-top: check-lib
+	$(MAKE) synth-netlist MODULE=attention_top
+	$(MAKE) sta MODULE=attention_top PERIOD_NS=$(PERIOD_NS)
+	python3 scripts/sta_summary.py build/sta_attention_top.log --period $(PERIOD_NS) --out build/sta_attention_top_summary.txt
+
 # Phase 4 GLS of both online_softmax netlists, with the netlists built first.
 gls:
 	$(MAKE) synth-netlist MODULE=online_softmax
@@ -105,11 +124,13 @@ gls:
 model-check:
 	@mkdir -p build/model
 	python3 model/crosscheck.py
+ifneq ($(VERIFY_NO_LEDGER),1)
 	@echo "| model-crosscheck-$(STAMP) | attn.py and attn.cpp bit-identical on random + corner cases; tracked exp LUT verified against generator and sha256 pin; float gate met | PASS | make model-check | 0 |" >> EVIDENCE.md
 	@echo "VERIFY OK: attn_model" >> EVIDENCE.md
+endif
 
 # Claim audit: sentence-level check of hardware/silicon verbs in the claim
-# documents (guide.md, README.md, docs/ writeups); see scripts/audit_claims.py.
+# documents (docs/guide.md, README.md, docs/ writeups); see scripts/audit_claims.py.
 # The old single grep exempted any LINE containing "pending", so a positive
 # board claim on such a line passed (review findings L10/F011).
 audit-guide:
@@ -120,3 +141,27 @@ audit-guide:
 # the clone without the toolchain (review finding F014). See evidence/README.md.
 evidence-snapshot:
 	python3 scripts/evidence_snapshot.py
+
+# Diagrams: Mermaid blocks in docs/diagrams.md render on GitHub as-is; the
+# WaveDrom timing diagram is rendered from its JSON source with the pinned
+# CLI (needs node/npx). Output is committed under docs/img/.
+diagrams:
+	npx --yes wavedrom-cli@3.1.1 -i docs/wavedrom/drain_overlap.json -s docs/img/drain_overlap.svg
+	@echo "rendered docs/img/drain_overlap.svg"
+
+# Perl ports (scripts/*.pl) must agree with the Python originals byte for
+# byte on the same stimulus; this is their evidence gate (2026-09-19).
+perl-crosscheck:
+	python3 scripts/perl_crosscheck.py
+
+# VHDL port of mac_unit (rtl_vhdl/, target-scores change 9): the SAME golden
+# vector file replayed through the VHDL (GHDL) and the SystemVerilog
+# (verilator) implementations by one cocotb test; the two observed traces
+# must be byte-identical and each must match the Python mirror. Needs ghdl
+# and verilator (both in oss-cad-suite). Never run where this was written.
+vhdl-crosscheck:
+	$(MAKE) -C tb/vhdl_mac LANG=vhdl MODULE=
+	$(MAKE) -C tb/vhdl_mac LANG=verilog MODULE=
+	python3 scripts/gen_mac_vectors.py --check tb/vhdl_mac/trace_vhdl.txt
+	python3 scripts/gen_mac_vectors.py --check tb/vhdl_mac/trace_verilog.txt
+	cmp tb/vhdl_mac/trace_vhdl.txt tb/vhdl_mac/trace_verilog.txt && echo "VHDL CROSSCHECK PASS: traces identical"

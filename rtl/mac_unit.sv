@@ -33,7 +33,17 @@ module mac_unit (
   always_comb begin
     prod  = a * b;               // exact 16-bit signed product
     base  = clr ? 24'sd0 : acc;
+`ifdef INJECT_BUG
+    // DELIBERATE MUTATION, compiled ONLY by `make -C tb/uvm bug-proof`
+    // (+define+INJECT_BUG): the load row ignores clr when en is high, so a
+    // new dot product accumulates onto the previous one. It exists to
+    // prove the UVM environment fails when the RTL is wrong; no normal
+    // build (verify, synth, formal, FPGA) defines the macro, and the lint
+    // hook / synth flows see the line below it. Added 2026-09-19.
+    acc_n = en ? acc + 24'(prod) : base;
+`else
     acc_n = en ? base + 24'(prod) : base;
+`endif
   end
 
   always_ff @(posedge clk) begin

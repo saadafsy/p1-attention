@@ -145,16 +145,38 @@ def to_u16(x):
     return x & 0xFFFF
 
 
-def main():
-    build = REPO / "build"
-    build.mkdir(exist_ok=True)
-    cyc = build_stimulus()
-    with open(build / "gls_stim.hex", "w") as f:
-        for (rst, iv, rs, s) in cyc:
-            f.write(f"{(rst << 18) | (iv << 17) | (rs << 16) | to_u16(s):05x}\n")
+def read_stimulus(path):
+    """Inverse of the gls_stim.hex writer (used by --stim, and by the Perl
+    port scripts/gen_gls_vectors.pl, so both mirrors can be fed the SAME
+    stimulus and their expected files compared byte for byte)."""
+    cyc = []
+    for line in open(path):
+        line = line.strip()
+        if not line:
+            continue
+        v = int(line, 16)
+        cyc.append(((v >> 18) & 1, (v >> 17) & 1, (v >> 16) & 1, v & 0xFFFF))
+    return cyc
+
+
+def main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--stim", help="read this stimulus file instead of generating one")
+    ap.add_argument("--out-dir", default=str(REPO / "build"))
+    a = ap.parse_args(argv)
+    build = Path(a.out_dir)
+    build.mkdir(parents=True, exist_ok=True)
+    if a.stim:
+        cyc = read_stimulus(a.stim)
+    else:
+        cyc = build_stimulus()
+        with open(build / "gls_stim.hex", "w", newline="\n") as f:
+            for (rst, iv, rs, s) in cyc:
+                f.write(f"{(rst << 18) | (iv << 17) | (rs << 16) | to_u16(s):05x}\n")
     for lat, fn in ((1, "gls_expected_lat1.hex"), (2, "gls_expected_lat2.hex")):
         exp = expected_lat1(cyc) if lat == 1 else expected_lat2(cyc)
-        with open(build / fn, "w") as f:
+        with open(build / fn, "w", newline="\n") as f:
             for (m, l, r, w, ov) in exp:
                 word = (to_u16(m) << 57) | (l << 33) | (r << 17) | (w << 1) | ov
                 f.write(f"{word:019x}\n")

@@ -101,6 +101,14 @@ def main():
               "(docs/uarch.md 3.5)")
         return 1
     print(f"exp LUT verified: {LUT_HEX} == generator output, sha256 matches pin")
+    # fpga/exp_lut.mem: the XPM MEMORY_INIT_FILE for fpga/exp_lut_2p_xilinx.sv
+    # (same one-word-per-line format); it must be the same bytes so the FPGA
+    # ROM and the models share the single table (2026-09-19).
+    mem = ROOT / "fpga" / "exp_lut.mem"
+    if mem.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n") != tracked:
+        print(f"CROSSCHECK FAIL: {mem} differs from {LUT_HEX}; copy the hex over it")
+        return 1
+    print(f"exp LUT verified: {mem} == {LUT_HEX}")
 
     # 2. Build the C++ model. Asserts stay on: no -DNDEBUG.
     cmd = ["g++", "-O2", "-std=c++17", "-Wall", "-Wextra",

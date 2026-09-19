@@ -647,6 +647,18 @@ Cycle diagram for PIPE_ROM = 1, the same 3-element row as in 8.2:
   w (visible) |  x   |  x   |  w(s0) |  w(s1) |  w(s2) |  w(s2)
   r (visible) |  x   |  x   |  r(s0) |  r(s1) |  r(s2) |  r(s2)
 
+ROM realization in PIPE_ROM = 1 (2026-09-19): the stage-1 registers w_p and
+r_p are the output registers of rtl/exp_lut_2p.sv, a two-read-port ROM
+module (ports addr_a = idx_w, addr_b = idx_r, en = in_valid, 1-cycle
+registered read, reset to 0) that includes the same generated
+rtl/exp_lut.svh case function. The values and the alignment are unchanged
+from the description above; the module boundary exists so an FPGA build
+can substitute fpga/exp_lut_2p_xilinx.sv (`define XILINX_FPGA), an XPM
+dual-port block ROM initialized from fpga/exp_lut.mem (the same bytes as
+model/exp_lut.hex, verified by make model-check), giving one block RAM per
+lane instead of 2 KB of LUT-mux logic on the critical path. PIPE_ROM = 0
+keeps the two combinational reads and does not instantiate the module.
+
 Formal (formal/online_softmax.sby): two tasks, both required green. Task p0
 elaborates the default and keeps the audited latency-1 property list of 8.2
 unchanged. Task p1 elaborates PIPE_ROM = 1 via chparam and proves the
@@ -777,6 +789,24 @@ identical control):
   the current group finish dividing. Overlapping the divide phase with the
   next group's block-0 compute (which has no drain dependency) is a valid
   future optimization, not implemented here.
+
+PIPE_ROM plumbing (2026-09-19): attention_top carries a PIPE_ROM parameter
+(default 0, the normative latency-1 configuration, bit-identical to the
+pre-parameter module) forwarded to the four online_softmax lanes. With
+PIPE_ROM = 1 each lane's out_valid arrives two cycles after in_valid, and
+exactly two things travel from the in_valid cycle to the out_valid cycle:
+the row_start pulse and the V row. Both gain one register stage
+(row_start_d becomes a two-deep per-cycle shift of lane_in_valid &
+lane_row_start, which is exact because a lane accepts at most one element
+per four cycles; v_row_pv is v_row_reg delayed once more). Nothing else
+changes: no FSM transition depends on out_valid, the drain schedule and
+the cycle formula are unchanged, and the last drained element's PV update
+now lands on S_DIVIDE cycle 1 (div_cnt = 1) for lane 3, while the divider
+first loads lane 0 at cycle 0 and lane 3 only 105 cycles later, so the
+divider never reads an accumulator before its final update. The FPGA top
+(fpga/attn_uart_top.sv) instantiates PIPE_ROM = 1; the cocotb testbench
+must pass unchanged in both elaborations (tb/attention_top/Makefile
+PIPE_ROM knob).
 
 n_len contract: the golden model (model/attn.py attn_fixed) accepts any
 1 <= N <= 256. This hardware module requires n_len a multiple of 4 in

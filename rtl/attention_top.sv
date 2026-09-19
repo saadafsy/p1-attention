@@ -50,7 +50,20 @@
 //
 // mac_unit, matmul_tile, online_softmax are instantiated verbatim (their own
 // verified control/format contracts, docs/uarch.md 8.1/8.2); NOT modified.
-module attention_top (
+//
+// Parameter PIPE_ROM (2026-09-19, docs/uarch.md 8.3 "PIPE_ROM plumbing"):
+// forwarded to the four online_softmax lanes. 0 (default) is the normative
+// latency-1 configuration, bit-identical to the pre-parameter module. 1
+// selects the registered-ROM lanes (out_valid two cycles after in_valid),
+// which this module absorbs with one extra stage on the two signals that
+// travel from the in_valid cycle to the out_valid cycle (row_start and the
+// V row); the FSM, the drain schedule and the cycle formula are unchanged
+// because no FSM transition depends on out_valid, and the last element's
+// PV update lands one S_DIVIDE cycle later than the divider first needs
+// its (different) row. Used by the FPGA build (fpga/attn_uart_top.sv).
+module attention_top #(
+    parameter bit PIPE_ROM = 1'b0
+) (
     input  logic        clk,
     input  logic        rst,        // synchronous, active-high
 
@@ -250,6 +263,22 @@ module attention_top (
     else v_row_reg <= v_mem[drain_v_row];
   end
 
+  // PIPE_ROM = 1: one more stage so the V row still lands on the (now two
+  // cycles later) out_valid cycle. Elements enter at most one per cycle
+  // across all lanes, so a plain per-cycle shift keeps every element's row
+  // aligned with its own out_valid.
+  logic [127:0] v_row_pv;  // the V row the PV datapath consumes this cycle
+  if (PIPE_ROM) begin : g_vrow_lat2
+    logic [127:0] v_row_reg2;
+    always_ff @(posedge clk) begin
+      if (rst) v_row_reg2 <= '0;
+      else v_row_reg2 <= v_row_reg;
+    end
+    assign v_row_pv = v_row_reg2;
+  end else begin : g_vrow_lat1
+    assign v_row_pv = v_row_reg;
+  end
+
   // out_mem: written whole (16 bytes) on out_we; read back byte-granular,
   // registered one cycle after rd_addr (out_we/out_wr_row/out_wr_data are
   // driven by the divider bank, declared further below; forward reference
@@ -358,7 +387,9 @@ module attention_top (
       lane_row_start[gL] = row_start_val && (lane == gL[1:0]);
     end
 
-    online_softmax u_sm (
+    online_softmax #(
+        .PIPE_ROM(PIPE_ROM)
+    ) u_sm (
         .clk      (clk),
         .rst      (rst),
         .in_valid (lane_in_valid[gL]),
@@ -372,17 +403,34 @@ module attention_top (
     );
   end
 
-  // One-cycle pipeline register: carry row_start from the in_valid cycle to
-  // the out_valid cycle (mirrors online_softmax's own row_start -> l_base
-  // alignment, uarch.md 8.3). The V row address no longer needs a separate
-  // pipeline register: the V RAM's own synchronous read latency (memory
-  // section above) provides that alignment directly.
-  logic        row_start_d [4];
+  // Pipeline: carry row_start from the in_valid cycle to the out_valid cycle
+  // (1 + PIPE_ROM cycles later), mirroring online_softmax's own
+  // row_start -> l_base alignment (uarch.md 8.3). A per-cycle shift of the
+  // qualified pulse (lane_in_valid & lane_row_start) is exact because a lane
+  // accepts at most one element per 4 cycles, so no two of its elements are
+  // ever in flight; row_start_d[L] is 1 on exactly the out_valid cycle of
+  // the lane's row-first element. (Before 2026-09-19 this was a hold
+  // register updated on in_valid; the values at every out_valid cycle are
+  // identical for PIPE_ROM = 0.) The V row needs no separate address
+  // register: the V RAM's own synchronous read latency provides that
+  // alignment (memory section above).
+  logic [3:0]  row_start_d;  // packed: driven per bit by continuous assigns below
 
   for (genvar gP = 0; gP < 4; gP++) begin : g_pipe
+    logic rs_s1;
     always_ff @(posedge clk) begin
-      if (rst) row_start_d[gP] <= 1'b0;
-      else if (lane_in_valid[gP]) row_start_d[gP] <= lane_row_start[gP];
+      if (rst) rs_s1 <= 1'b0;
+      else rs_s1 <= lane_in_valid[gP] && lane_row_start[gP];
+    end
+    if (PIPE_ROM) begin : g_rs_lat2
+      logic rs_s2;
+      always_ff @(posedge clk) begin
+        if (rst) rs_s2 <= 1'b0;
+        else rs_s2 <= rs_s1;
+      end
+      assign row_start_d[gP] = rs_s2;
+    end else begin : g_rs_lat1
+      assign row_start_d[gP] = rs_s1;
     end
   end
 
@@ -446,7 +494,7 @@ module attention_top (
       acc_base   = pv_row_start ? 32'sd0 : acc_num[pv_lane][gK];
       ar_full    = 49'(signed'(acc_base) * signed'({1'b0, pv_r}));
       ar_rnd     = ar_full + 49'sd16384;
-      wv_prod    = 24'(signed'({1'b0, pv_w}) * signed'(v_row_reg[8*gK+:8]));
+      wv_prod    = 24'(signed'({1'b0, pv_w}) * signed'(v_row_pv[8*gK+:8]));
       pv_next[gK] = 32'(ar_rnd >>> 15) + 32'(wv_prod);
     end
   end

@@ -25,11 +25,24 @@ PWD := $(shell pwd)
 VERILOG_SOURCES = $(PWD)/coverage.vlt \
                    $(PWD)/../../rtl/mac_unit.sv \
                    $(PWD)/../../rtl/matmul_tile.sv \
+                   $(PWD)/../../rtl/exp_lut_2p.sv \
                    $(PWD)/../../rtl/online_softmax.sv \
                    $(PWD)/../../rtl/attention_top.sv
 
 COCOTB_TOPLEVEL = attention_top
 COCOTB_TEST_MODULES = test_attention_top
+
+# PIPE_ROM knob (2026-09-19): attention_top forwards PIPE_ROM to its
+# online_softmax lanes and absorbs the extra cycle internally, so the SAME
+# test module (same golden compare, same cycle formula) must pass in both
+# elaborations. Artifact-isolated exactly like tb/online_softmax.
+PIPE_ROM ?= 0
+ifeq ($(PIPE_ROM),1)
+SIM_BUILD ?= sim_build_pipe_rom1
+COCOTB_RESULTS_FILE ?= results_pipe_rom1.xml
+EXTRA_ARGS += -GPIPE_ROM=1
+COCOTB_PLUSARGS += +verilator+coverage+file+coverage_pipe_rom1.dat
+endif
 
 EXTRA_ARGS += +incdir+$(PWD)/../..
 EXTRA_ARGS += --coverage-line
