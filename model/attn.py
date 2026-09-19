@@ -42,8 +42,9 @@ def gen_exp_lut():
 
 
 def emit_lut(path):
-    """Write the normative hex table consumed by attn.cpp and later by RTL
-    ($readmemh): 1024 lines, 4 lowercase hex digits each."""
+    """Write the normative hex table consumed by attn.cpp (the RTL consumes
+    the same table rendered by emit_lut_svh, not $readmemh): 1024 lines,
+    4 lowercase hex digits each."""
     lut = gen_exp_lut()
     with open(path, "w") as f:
         for v in lut:

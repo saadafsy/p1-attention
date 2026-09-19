@@ -30,15 +30,21 @@ module sync2ff #(
     output logic [WIDTH-1:0] q     // synchronized, 2-cycle latency
 );
 
+  // ASYNC_REG on BOTH stages (2026-09-18, review finding L15): Vivado keeps
+  // tagged flops adjacent and excludes them from retiming/SRL inference;
+  // tagging only the first stage left q free to be moved away from meta.
   (* ASYNC_REG = "TRUE" *) logic [WIDTH-1:0] meta;
+  (* ASYNC_REG = "TRUE" *) logic [WIDTH-1:0] q_r;
+
+  assign q = q_r;
 
   always_ff @(posedge clk) begin
     if (rst) begin
       meta <= RST_VAL;
-      q    <= RST_VAL;
+      q_r  <= RST_VAL;
     end else begin
       meta <= d;
-      q    <= meta;
+      q_r  <= meta;
     end
   end
 

@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Run once from the root of your ASIC repo:  bash setup-claude-code.sh
+# Run once from the root of your ASIC repo:  bash setup-p1.sh
 # Creates the Alpha/Beta agent roster, the audit hooks, PLAN.md and EVIDENCE.md.
-# It does NOT overwrite an existing CLAUDE.md or Makefile (yours win).
+# It NEVER overwrites an existing file: every artifact below is written only if
+# absent (2026-09-18, review finding L6: the original unconditionally rewrote
+# .claude/settings.json, dropping the statusLine entry, and every agent file).
+# Delete a file first if you want the scaffold version back.
 set -euo pipefail
 
 mkdir -p .claude/agents .claude/hooks .claude/skills/write-guide
@@ -10,6 +13,7 @@ mkdir -p .claude/agents .claude/hooks .claude/skills/write-guide
 # TEAM ALPHA (builders, may edit files)
 # ---------------------------------------------------------------------------
 
+if [ ! -f .claude/agents/rtl-designer.md ]; then
 cat > .claude/agents/rtl-designer.md << 'EOF'
 ---
 name: rtl-designer
@@ -37,7 +41,9 @@ Build order: mac_unit -> matmul_tile -> online_softmax -> attention_top.
 - Never claim a step passed without pasting its output. Never edit EVIDENCE.md by hand.
 Hand off to the auditors only when verify exits 0.
 EOF
+fi
 
+if [ ! -f .claude/agents/verification-engineer.md ]; then
 cat > .claude/agents/verification-engineer.md << 'EOF'
 ---
 name: verification-engineer
@@ -62,11 +68,13 @@ correctness, accumulator never overflows its declared width.
 - Use a fixed seed and record it. Run the sim and coverage targets and paste the results with exit codes.
 - You may not weaken a check to make it pass. A failing check is a finding for the designer.
 EOF
+fi
 
 # ---------------------------------------------------------------------------
 # TEAM BETA (red team, READ-ONLY: no Edit/Write; they re-run and report)
 # ---------------------------------------------------------------------------
 
+if [ ! -f .claude/agents/lint-synth-auditor.md ]; then
 cat > .claude/agents/lint-synth-auditor.md << 'EOF'
 ---
 name: lint-synth-auditor
@@ -82,7 +90,9 @@ You are adversarial and read-only by design: you report, you do not fix.
 - Countersign only by referencing the EVIDENCE.md row. If synth-check did not exit 0,
   refuse to sign and list every failing item.
 EOF
+fi
 
+if [ ! -f .claude/agents/formal-coverage-auditor.md ]; then
 cat > .claude/agents/formal-coverage-auditor.md << 'EOF'
 ---
 name: formal-coverage-auditor
@@ -100,11 +110,13 @@ You are adversarial and read-only by design: you report, you do not fix.
 - Countersign only by referencing the EVIDENCE.md row. If any check did not exit 0,
   refuse to sign and list every failing property or coverage hole.
 EOF
+fi
 
 # ---------------------------------------------------------------------------
 # TECHNICAL WRITER (see technical-writer.md contract for the full rules)
 # ---------------------------------------------------------------------------
 
+if [ ! -f .claude/agents/technical-writer.md ]; then
 cat > .claude/agents/technical-writer.md << 'EOF'
 ---
 name: technical-writer
@@ -141,8 +153,10 @@ types "tutor me on <module>"): you switch from documenter to teacher. Rules for 
   fail, then explain the strong answer. Sign off only when they can defend every line.
 - You are teaching, not editing: no Write/Edit in Mode B.
 EOF
+fi
 
 # make the writer also reachable as a slash-skill: /write-guide
+if [ ! -f .claude/skills/write-guide/SKILL.md ]; then
 cat > .claude/skills/write-guide/SKILL.md << 'EOF'
 ---
 name: write-guide
@@ -152,13 +166,19 @@ Delegate to the technical-writer subagent. Regenerate guide.md following the con
 technical-writer.md and the rubric in asic-guide-fidelity-rubric.md. Do not invent numbers
 or bench results. End by running `make audit-guide` and report the exit code.
 EOF
+fi
 
 # ---------------------------------------------------------------------------
 # HOOKS: lint on every RTL edit, and block "Done" without a passing verify
 # ---------------------------------------------------------------------------
 
+if [ ! -f .claude/settings.json ]; then
 cat > .claude/settings.json << 'EOF'
 {
+  "statusLine": {
+    "type": "command",
+    "command": "bash $CLAUDE_PROJECT_DIR/scripts/progress_status.sh"
+  },
   "hooks": {
     "PostToolUse": [
       { "matcher": "Edit|Write",
@@ -172,88 +192,92 @@ cat > .claude/settings.json << 'EOF'
   }
 }
 EOF
+fi
 
+if [ ! -f .claude/hooks/lint_on_edit.sh ]; then
 cat > .claude/hooks/lint_on_edit.sh << 'EOF'
 #!/usr/bin/env bash
-# During development this WARNS but does not block (half-written modules warn a lot).
-# It hard-blocks (exit 2) ONLY for files listed in .ready_for_lint (one path per line),
-# i.e. modules the builder has declared ready. This stops the deadlock where every
-# mid-edit save is rejected.
-file=$(jq -r '.tool_input.file_path // empty' 2>/dev/null || true)
-case "$file" in
-  *.sv|*.v)
-    command -v verilator >/dev/null 2>&1 || exit 0
-    if ! verilator --lint-only -Wall -sv "$file" 2>/tmp/lint.err; then
-      if [ -f .ready_for_lint ] && grep -qF "$file" .ready_for_lint; then
-        echo "Lint failed on READY file $file:" >&2; cat /tmp/lint.err >&2; exit 2
-      else
-        echo "Lint warnings on $file (dev mode, not blocking):" >&2; cat /tmp/lint.err >&2; exit 0
-      fi
-    fi ;;
+# PostToolUse hook (Edit|Write): lint an edited .sv/.v file with verilator.
+# WARNS during development; hard-blocks (exit 2) only for files listed in
+# .ready_for_lint (repo-relative paths, one per line).
+#
+# Rewritten 2026-09-18 (review finding H4). The original (1) compared the
+# ABSOLUTE tool_input.file_path against the RELATIVE entries of
+# .ready_for_lint, so the hard-block never fired; (2) linted the single file
+# alone, so online_softmax.sv (`include "rtl/exp_lut.svh"), matmul_tile.sv
+# and attention_top.sv (submodules) always errored regardless of content.
+# Now: path is made repo-relative, the whole rtl/ set (plus the edited
+# file's own directory, e.g. fpga/) is elaborated with the repo root as the
+# include dir and the edited module as top.
+set -u
+root=${CLAUDE_PROJECT_DIR:-$(pwd)}
+cd "$root" || exit 0
+
+abs=$(jq -r '.tool_input.file_path // empty' 2>/dev/null || true)
+case "$abs" in
+  *.sv|*.v) ;;
+  *) exit 0 ;;
 esac
+command -v verilator >/dev/null 2>&1 || exit 0
+
+rel=$(realpath --relative-to="$root" "$abs" 2>/dev/null || printf '%s' "$abs")
+rel=${rel#./}
+mod=$(basename "$rel"); mod=${mod%.*}
+dir=$(dirname "$rel")
+
+srcs=(rtl/*.sv)
+if [ "$dir" != "rtl" ]; then srcs+=("$dir"/*.sv); fi
+
+err=$(mktemp); trap 'rm -f "$err"' EXIT
+if ! verilator --lint-only -Wall -sv +incdir+. --top-module "$mod" "${srcs[@]}" 2>"$err"; then
+  if [ -f .ready_for_lint ] && grep -Fxq -- "$rel" .ready_for_lint; then
+    echo "Lint failed on READY file $rel:" >&2; sed 's/^/  /' "$err" >&2; exit 2
+  fi
+  echo "Lint warnings on $rel (dev mode, not blocking):" >&2; sed 's/^/  /' "$err" >&2
+fi
 exit 0
 EOF
 chmod +x .claude/hooks/lint_on_edit.sh
+fi
 
+if [ ! -f .claude/hooks/verify_gate.sh ]; then
 cat > .claude/hooks/verify_gate.sh << 'EOF'
 #!/usr/bin/env bash
-# Block ending a session with a module marked Done that has no passing verify.
+# Stop hook: block ending a session with a module marked [Done] in PLAN.md
+# that has no "VERIFY OK: <module>" line in EVIDENCE.md.
+#
+# Rewritten 2026-09-18 (review finding H3). The original had two defects that
+# made it a no-op: (1) `exit 2` ran inside a `while read` fed by a pipe, i.e.
+# in a subshell, so the outer script always exited 0; (2) the regex captured
+# only "rtl" from "[Done] rtl/mac_unit.sv" while EVIDENCE rows read
+# "VERIFY OK: mac_unit". The loop now runs in the main shell (process
+# substitution) and the module name is the path basename without extension.
+set -u
+root=${CLAUDE_PROJECT_DIR:-$(pwd)}
+cd "$root" || exit 2
 [ -f PLAN.md ] || exit 0
-grep -oE '\[Done\][[:space:]]+[A-Za-z0-9_]+' PLAN.md 2>/dev/null | awk '{print $2}' | while read -r mod; do
-  if ! grep -q "VERIFY OK: $mod" EVIDENCE.md 2>/dev/null; then
-    echo "Task '$mod' is marked Done but has no passing verify in EVIDENCE.md." >&2
-    exit 2
+
+status=0
+while IFS= read -r mod; do
+  [ -n "$mod" ] || continue
+  if ! grep -Fxq -- "VERIFY OK: $mod" EVIDENCE.md 2>/dev/null; then
+    echo "Task '$mod' is marked [Done] in PLAN.md but has no 'VERIFY OK: $mod' row in EVIDENCE.md." >&2
+    status=2
   fi
-done
-exit 0
+done < <(sed -nE 's|.*\[Done\][[:space:]]+([A-Za-z0-9_./-]+).*|\1|p' PLAN.md \
+         | sed -E 's|^.*/||; s|\.[A-Za-z0-9]+$||')
+exit $status
 EOF
 chmod +x .claude/hooks/verify_gate.sh
+fi
 
 # ---------------------------------------------------------------------------
 # PLAN.md and EVIDENCE.md (the Lead's worklist and the ledger)
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# FIX: real coverage checker (Makefile calls scripts/check_coverage.py)
-# ---------------------------------------------------------------------------
+# scripts/check_coverage.py is a tracked file with its own history; the scaffold
+# no longer embeds a copy (the embedded one was the superseded pooled version).
 mkdir -p scripts
-if [ ! -f scripts/check_coverage.py ]; then
-cat > scripts/check_coverage.py << 'EOF'
-#!/usr/bin/env python3
-"""Threshold gate for verilator coverage. Fails (exit 1) if below thresholds.
-Reads logs/annotated coverage.dat if present; until Phase 3 exists it is a
-tolerant stub controlled by COVERAGE_STUB=1 so early phases are not blocked."""
-import os, sys, argparse, glob
-ap = argparse.ArgumentParser()
-ap.add_argument('--line', type=float, default=90.0)
-ap.add_argument('--func', type=float, default=100.0)
-a = ap.parse_args()
-if os.environ.get('COVERAGE_STUB') == '1':
-    print('coverage: STUB pass (COVERAGE_STUB=1, pre-Phase-3)'); sys.exit(0)
-dat = glob.glob('**/coverage.dat', recursive=True) + glob.glob('**/*.dat', recursive=True)
-if not dat:
-    print('coverage: no coverage.dat found. Run verilator with --coverage, or set '
-          'COVERAGE_STUB=1 for early phases.'); sys.exit(1)
-# Minimal parse: count covered vs total points from verilator coverage.dat lines.
-covered=total=0
-for f in dat:
-    try:
-        for ln in open(f):
-            if ln.startswith('C '):
-                total+=1
-                # last whitespace field is the hit count
-                try:
-                    if int(ln.split()[-1])>0: covered+=1
-                except ValueError: pass
-    except OSError: pass
-if total==0:
-    print('coverage: coverage.dat had no C points; set COVERAGE_STUB=1 if pre-Phase-3.'); sys.exit(1)
-pct=100.0*covered/total
-print(f'coverage: {covered}/{total} points = {pct:.1f}% (line threshold {a.line}%)')
-sys.exit(0 if pct>=a.line else 1)
-EOF
-chmod +x scripts/check_coverage.py
-fi
 
 if [ ! -f PLAN.md ]; then
 cat > PLAN.md << 'EOF'

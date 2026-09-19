@@ -1,4 +1,4 @@
-# CLAUDE.md — Project 1: Streaming Attention Engine (builder mode)
+# CLAUDE.md: Project 1: Streaming Attention Engine (builder mode)
 
 ## What this project is
 A fixed-point streaming attention accelerator (online softmax + tiled matmul) in

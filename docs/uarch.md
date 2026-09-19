@@ -721,15 +721,24 @@ online_softmax's own timing contract, 8.2), attention_top updates lane L's
 r, w come from lane L's registered outputs; v_row is V's row for the element
 that produced this (w, r), i.e. the SAME v row that was fed to the lane one
 cycle earlier. Because round-robin guarantees at most one lane fires
-out_valid on any given cycle in steady state, and even at the two lane
-handoffs the writes target disjoint (lane, k) storage, ONE shared 16-wide PV
-datapath (16 parallel rescale-multiply-add lanes, replicated by k) suffices;
-it is instantiated once and driven by whichever lane's out_valid is
-currently high. Two 1-cycle pipeline registers per lane (row_start_d[L],
-vrow_pipe[L]) carry row_start and the V row address from the in_valid cycle
-to the out_valid cycle, exactly mirroring online_softmax's internal
-row_start-to-l_base alignment (8.2) so acc[L] resets to 0 on the row's first
-element instead of accumulating stale data from the previous row group.
+out_valid on any given cycle (lane = t[1:0] is single-valued and out_valid
+is one cycle behind in_valid; asserted as $onehot0 in the FORMAL block),
+ONE shared 16-wide PV datapath suffices: a lane select (pv_lane, from the
+one-hot lane_out_valid vector) muxes that lane's acc bank, r, w and
+row_start_d into 16 rescale-multiply-add columns (one per k), and only the
+selected lane's acc bank registers the result. The datapath holds 16
+acc*r multipliers (32s x 16u) and 16 w*v multipliers (16u x 8s): 32
+multiply operations per cycle in the PV path, plus the tile's 16, for 48
+multipliers in the whole engine. Implementation note (2026-09-18): the
+first RTL revision replicated the arithmetic per (lane, k), elaborating
+4x this count; the shared form above is what the RTL now implements
+(rtl/attention_top.sv g_pv), the arithmetic per column is unchanged.
+One 1-cycle pipeline register per lane (row_start_d[L]) carries row_start
+from the in_valid cycle to the out_valid cycle (the V row needs no register:
+the V RAM's own read latency provides that alignment, see the memory
+section), exactly mirroring online_softmax's internal row_start-to-l_base
+alignment (8.2) so acc[L] resets to 0 on the row's first element instead of
+accumulating stale data from the previous row group.
 
 acc*r intermediate: 48-bit signed (32s x 16u, 3.7/6.1); rshr rounds with the
 same round-half-up bias as online_softmax's l path, arithmetic-shifted so a
@@ -894,9 +903,18 @@ cycle_count value is the authoritative check for the exact constant term.
 FORMAL block (control-only, per CLAUDE.md's formal-is-a-subset rule):
 reset state (S_IDLE, busy=0, done=0, cycle_count=0), busy/done mutual
 exclusion, done implies idle, cycle_count monotone non-decreasing while
-busy. None of these properties reference q_mem/k_mem/v_mem/out_mem, the
-NUM accumulators, the score/rescale arithmetic, or the divider bank: the
-control FSM's transition conditions depend only on counters (t, kb, rg,
-row, div_cnt) and start, never on datapath values, so this stays solver-
-cheap by construction even though the full netlist still elaborates the
-datapath as part of the design.
+busy, and lane_out_valid one-hot-or-zero (the invariant the shared PV
+datapath relies on). None of these properties reference q_mem/k_mem/v_mem/
+out_mem, the NUM accumulators, the score/rescale arithmetic, or the divider
+bank: the control FSM's transition conditions depend only on counters (t,
+kb, rg, row, div_cnt) and start, never on datapath values, so this stays
+solver-cheap by construction even though the full netlist still elaborates
+the datapath as part of the design.
+
+Bound (2026-09-18): the shortest run is 173 cycles (n_len = 4), so any BMC
+depth below that can never reach done and proves the done-based properties
+only vacuously; the first proof ran at depth 10 and did exactly that. The
+FORMAL block now assumes n_len = 4 on the accepted start and
+formal/attention_top.sby runs a `prove` task at depth 180 plus a `cover`
+task that must reach `cover (done)`; a claimed PASS for this module means
+both tasks passed at that depth.

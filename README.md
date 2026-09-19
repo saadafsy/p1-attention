@@ -13,24 +13,42 @@ power proxy.
 Every result below cites an EVIDENCE.md row id. No claim in this table is
 made without one.
 
+Review note (2026-09-18): a two-reviewer static audit found no datapath bug
+but several gate, proof and documentation defects; all are fixed on branch
+review-fixes and recorded as errata rows at the end of EVIDENCE.md. Three
+fixes touch verified code (attention_top's PV datapath restructured into the
+one shared bank the spec always described; attention_top formal now proves
+completion at depth 180 instead of vacuously at depth 10; the UART wrapper
+NAKs out-of-contract SET_NLEN and reads-while-busy) and several tighten
+gates (line coverage counts only line points, with declared waivers; synth
+and STA recipes fail when the tool fails). None of those changes has been
+re-run through the toolchain yet: PLAN.md marks the affected modules
+[Building] and the table below describes the last verified revision.
+
 | Item | Status | Evidence |
 |------|--------|----------|
 | Phase -1: toolchain smoke test through the full verify pipeline | PASS | [verify-tool_smoke] |
 | Phase 0: golden models (Python, C++) bit-identical, LUT emitted, float error gate met | PASS | [model-crosscheck] |
-| rtl/mac_unit.sv: verify green, dual auditor countersigned | PASS | [verify-mac_unit], [audit-mac_unit-lint-synth], [audit-mac_unit-formal-coverage] |
+| rtl/mac_unit.sv: verify green, dual auditor countersigned (TB seed plumbing fixed 2026-09-18, re-verify pending) | PASS, re-verify | [verify-mac_unit], [audit-mac_unit-lint-synth], [audit-mac_unit-formal-coverage], [errata-mac_unit-two-seeds-20260918] |
 | rtl/matmul_tile.sv: verify green, dual auditor countersigned | PASS | [verify-matmul_tile], [audit-matmul_tile-lint-synth], [audit-matmul_tile-formal-coverage] |
 | rtl/online_softmax.sv: verify green, dual countersigned, re-audited after PIPE_ROM parameterization | PASS | [verify-online_softmax], [audit-online_softmax-pipe-lint-synth], [audit-online_softmax-pipe-formal-coverage] |
-| rtl/attention_top.sv: end-to-end integration, BRAM-pattern memories, dual countersigned | PASS | [verify-attention_top], [bram-conversion-attention_top], [audit-attention_top-lint-synth], [audit-attention_top-formal-coverage] |
-| Phase 2 benchmark vs the CPU golden model (cycle counts, closed-form model) | closed | docs/benchmark.md, tb/attention_top/cycles.txt |
+| rtl/attention_top.sv: end-to-end integration, BRAM-pattern memories, dual countersigned (last verified revision; shared-PV rewrite + depth-180 formal 2026-09-18, re-verify pending) | PASS, re-verify | [verify-attention_top], [bram-conversion-attention_top], [audit-attention_top-lint-synth], [audit-attention_top-formal-coverage], [errata-pv-datapath-structure-20260918], [errata-attention_top-formal-vacuous-20260918] |
+| Phase 2 benchmark vs the CPU golden model (cycle counts, closed-form model; MAC count corrected 2026-09-18) | closed | docs/benchmark.md, tb/attention_top/cycles.txt, [errata-benchmark-mac-count-20260918] |
 | Phase 3: functional coverage 52/52 reachable bins + exact-max formal property | closed | [phase3-closure] |
 | Phase 4: PIPE_ROM pipelining iteration, sky130 STA, GLS both netlists 0 errors | closed | [phase4-sta] |
 | Phase 5: switching-activity power proxy + tradeoffs writeup | closed | [phase5-docs] |
-| Phase 6 (FPGA), Phase 7 silicon | PENDING-HARDWARE; Phase 7 GDS is future sandbox work | see docs/ |
+| Phase 6 bring-up kit (fpga/, host script): verified in simulation only (protocol hardened 2026-09-18, re-verify pending) | sim PASS, re-verify | [fpga-kit-sim], [audit-fpga-kit-lint-synth], [audit-fpga-kit-formal-coverage] |
+| Phase 6 on a board, Phase 7 silicon | PENDING-HARDWARE; Phase 7 GDS is future sandbox work | see docs/ |
 
 Bracketed ids are rows in [EVIDENCE.md](EVIDENCE.md), the append-only ledger
-every `make verify` and `make model-check` run writes to on success. Per
-PLAN.md, closed phases are [Ready], not [Done]: the Done gate additionally
-requires the project owner's Mode-B replication pass, which has not run yet.
+every `make verify` and `make model-check` run writes to on success (rows
+carry a UTC timestamp suffix since 2026-09-18 so a citation names one run).
+Per PLAN.md, closed phases are [Ready], not [Done]: the Done gate
+additionally requires the project owner's Mode-B replication pass, which
+has not run yet. Numbers quoted from build/ reports (slack, cells, toggles,
+mW) are inspectable from a clone only once `make evidence-snapshot` has
+copied the reports into evidence/ (evidence/README.md); no snapshot exists
+yet for the historical rows.
 
 ## The sandbox/silicon wall
 
@@ -47,8 +65,13 @@ implemented on FPGA and nothing is fabricated. Every timing and power number
 in this repo is a tool estimate at one corner; hardware claims stay
 PENDING-HARDWARE until real bench evidence (a board bring-up log, a measured
 clock sweep, a chip photo) is added as an EVIDENCE.md row. This wall is
-enforced mechanically for guide.md by `make audit-guide`, which fails the
-build if an unbacked hardware/silicon claim appears in it.
+checked mechanically by `make audit-guide` (scripts/audit_claims.py): a
+sentence-level scan of guide.md, this README and the docs/ writeups that
+fails the build on a hardware/silicon verb without an interim qualifier in
+the same clause. It is a heuristic gate, not a proof of honesty; the ledger
+is. The "timing limiter" statement above is an inference from block-level
+STA of online_softmax, mac_unit and matmul_tile; no attention_top netlist
+has been through STA.
 
 ## Repo map
 
@@ -67,10 +90,13 @@ docs/     uarch.md (the normative numeric/microarchitecture spec),
           benchmark.md (Phase 2), verification_plan.md (Phase 5 plan),
           tradeoffs.md (Phase 5 naive-vs-pipelined writeup), the Phase 6
           FPGA and Phase 7 physical-design guides.
-scripts/  check_coverage.py (the coverage gate), sta.tcl and
-          power_proxy.tcl (OpenSTA), gen_gls_vectors.py (spec-derived GLS
-          vectors), toggle_count.py (VCD activity), benchmark_cpu.py.
-build/    Generated netlists, synthesis/STA/GLS/power logs.
+scripts/  check_coverage.py (the coverage gate: line points + declared
+          waivers, functional TOTAL), audit_claims.py (claim audit),
+          evidence_snapshot.py, sta.tcl and power_proxy.tcl (OpenSTA),
+          gen_gls_vectors.py (spec-derived GLS vectors), toggle_count.py
+          (VCD activity), benchmark_cpu.py.
+evidence/ Tracked snapshots of the build/ reports EVIDENCE rows cite.
+build/    Generated netlists, synthesis/STA/GLS/power logs (gitignored).
 ```
 
 ## Reproduce it yourself
@@ -89,17 +115,32 @@ make verify MODULE=matmul_tile
 make verify MODULE=online_softmax
 make verify MODULE=attention_top
 
-# Phase 4: sky130 netlist + OpenSTA, and gate-level sim of both configs
+# Phase 4: sky130 netlists + OpenSTA (needs LIB, see below), then
+# gate-level sim of both configs (`make gls` builds both netlists first)
 make synth-netlist MODULE=online_softmax
 make sta MODULE=online_softmax PERIOD_NS=26
-make -C tb/gls all
+make synth-netlist-pipe1
+make sta-pipe1 PERIOD_NS=13
+make gls
 
 # Phase 5: switching-activity comparison of the two GLS VCDs
 python3 scripts/toggle_count.py build/gls_lat1.vcd build/gls_lat2.vcd
 
-# Audit guide.md for unbacked hardware claims
+# Audit the claim documents for unbacked hardware claims; snapshot reports
 make audit-guide
+make evidence-snapshot
 ```
+
+Toolchain paths. Two locations are machine-specific and must be set (or
+staged at the default) before the Phase 4 targets run: `LIB`, the sky130
+liberty file (`make ... LIB=/path/to/sky130_fd_sc_hd__tt_025C_1v80.lib`,
+default `$HOME/tools/lib/`), and `CELLS_SRC` in tb/gls/Makefile, the
+directory holding the PDK's `sky130_fd_sc_hd.v` and `primitives.v` (default
+the oss-cad-suite eqy example). The Phase 4 targets fail with a message if
+`LIB` is missing. Everything before Phase 4 needs only verilator, verible,
+cocotb, yosys and sby on PATH. Line endings are pinned to LF by
+.gitattributes; a checkout with `core.autocrlf=true` before 2026-09-18
+broke the LUT checksum check.
 
 The full command set, including the PIPE_ROM=1 simulation, the pipelined
 netlist synthesis, and the calibrated power proxy, is in

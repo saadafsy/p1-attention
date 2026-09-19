@@ -82,11 +82,13 @@ def build_load_row(cmd, row, data16):
 
 
 def build_set_nlen(n_len):
-    """n_len byte; the low 7 bits are stored (guide 6.3.4). The contract
-    (multiple of 4 in [4, 64]) is NOT validated here (the device does not
-    validate it either); building an out-of-contract frame is legal, the
-    device's behavior is simply undefined, exactly as in simulation."""
-    return bytes([CMD_SET_NLEN, n_len & 0x7F])
+    """n_len byte (guide 6.3.4). The DEVICE validates the contract (multiple
+    of 4 in [4, 64]) and answers NAK 0x3F, leaving the stored value
+    unchanged, for anything else (since 2026-09-18; before that an
+    out-of-contract byte launched an undefined run). Building an
+    out-of-contract frame is still legal here so the NAK path can be
+    tested; the byte is sent as given (masked to 8 bits)."""
+    return bytes([CMD_SET_NLEN, n_len & 0xFF])
 
 
 def build_run():
@@ -249,12 +251,22 @@ class SerialLink:
         return parse_status(self.read(1)[0])
 
     def read_out_row(self, row):
+        """READ_OUT. The device NAKs (one byte, 0x3F) while a run is busy
+        (guide 6.3.4, 2026-09-18); poll STATUS until done first, as main()
+        does. A NAK here raises rather than being mis-parsed as row data."""
         self.write(build_read_out(row))
-        return decode_out_row(self.read(ROW_BYTES))
+        first = self.read(1)
+        if is_nak(first[0]):
+            raise RuntimeError("READ_OUT NAKed: device busy; poll STATUS until done")
+        return decode_out_row(first + self.read(ROW_BYTES - 1))
 
     def read_cycles(self):
+        """READ_CYCLES; NAKs while busy, same handling as read_out_row."""
         self.write(build_read_cycles())
-        return decode_cycles(self.read(4))
+        first = self.read(1)
+        if is_nak(first[0]):
+            raise RuntimeError("READ_CYCLES NAKed: device busy; poll STATUS until done")
+        return decode_cycles(first + self.read(3))
 
     def resync(self, settle_timeout=0.5):
         """guide 6.3.4 resync procedure, CORRECTED: send 18 pings, then
@@ -299,7 +311,7 @@ def selftest():
     assert build_set_nlen(16) == bytes([CMD_SET_NLEN, 16])
     assert build_set_nlen(64) == bytes([CMD_SET_NLEN, 64])
     # low-7-bits-only wrap: an out-of-range byte still encodes deterministically
-    assert build_set_nlen(0x81) == bytes([CMD_SET_NLEN, 0x01])
+    assert build_set_nlen(0x81) == bytes([CMD_SET_NLEN, 0x81])  # sent as-is; the device NAKs it
     assert build_run() == bytes([CMD_RUN])
     assert build_status() == bytes([CMD_STATUS])
     assert build_read_out(3) == bytes([CMD_READ_OUT, 3])

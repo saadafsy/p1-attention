@@ -18,8 +18,8 @@
 #       6.1); otherwise m equals the exact max recurrence (which subsumes
 #       the retained monotonicity assert).
 #   p1: PIPE_ROM=1 via chparam on the deferred module: same clamp facts and
-#     reset state, the same latency-1 exact-max m recurrence (m does not
-#     move in this variant), plus latency-2 alignment over two reset-free
+#     reset state, the same exact-max m recurrence (m commits in stage 1 at
+#     latency 1 and does not move INTO the latency-2 stage), plus latency-2 alignment over two reset-free
 #     history cycles: out_valid == in_valid two cycles earlier, and l, w, r
 #     hold when no element was accepted two cycles earlier.
 # Rich behavioral checks (LUT entry-for-entry equivalence, full recurrence

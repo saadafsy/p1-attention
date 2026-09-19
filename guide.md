@@ -27,6 +27,18 @@ functional and line coverage, lint, latch-free synthesis checks, bounded
 formal proofs, sky130 synthesis with OpenSTA timing, gate-level simulation of
 the synthesized netlists, and a switching-activity power proxy.
 
+Review note (2026-09-18): a two-reviewer static audit of commit 69dd015
+found no datapath bug but several gate, proof and documentation defects,
+all fixed on the review-fixes branch (see the errata rows at the end of
+EVIDENCE.md). Two of the fixes change verified code: the attention_top PV
+datapath was restructured into the single shared bank docs/uarch.md 8.3
+always specified (arithmetic per column unchanged), and formal/attention_top
+now proves completion at depth 180 instead of vacuously at depth 10. Those
+changes have NOT yet been re-run through make verify (no toolchain on the
+machine that made them); until the new verify-attention_top-<stamp> row
+exists, attention_top's status is [Building] in PLAN.md and every
+attention_top result below describes the last verified revision.
+
 Honest status in one sentence: the design is verified in simulation and
 formal; every module is synthesized to a latch-free netlist (yosys check, 0
 problems); the online_softmax core, the design's timing limiter, meets timing
@@ -367,7 +379,9 @@ formal) [EVIDENCE: verify-mac_unit].
 
 Simulation (tb/mac_unit/test_mac_unit.py, cocotb under verilator, drive on
 RisingEdge, sample on FallingEdge): 4 tests, all passing, independently
-re-run by the formal-coverage auditor on two seeds
+re-run by the formal-coverage auditor; note that the two-seed re-run in
+that row exercised identical random vectors because the RNGs were fixed
+literals at the time (section 4.5; fixed 2026-09-18, not yet re-run)
 [EVIDENCE: audit-mac_unit-formal-coverage]:
 
 1. reset_and_directed: reset clears; every control combination checked with
@@ -435,15 +449,13 @@ cocotb mirror and the golden-model dot products).
 
 ### 4.5 Known gaps (auditor findings, stated honestly)
 
-- The mac_unit testbench RNGs are fixed literals (random.Random(2) and
-  random.Random(3)), so the Makefile SEED variable does not change this
-  module's random stimulus; the auditor's two-seed re-run therefore
-  repeated identical random tests for this module. The finding was
-  carried forward and fixed in every later testbench (tb/matmul_tile and
-  tb/online_softmax build their RNGs from cocotb.RANDOM_SEED; see the
-  tb/matmul_tile/test_matmul_tile.py docstring, which documents this as a
-  mandatory carried-forward auditor finding). The gap was noted in the
-  audit report [EVIDENCE: audit-mac_unit-formal-coverage].
+- The mac_unit testbench RNGs WERE fixed literals (random.Random(2) and
+  random.Random(3)), so the Makefile SEED variable did not change this
+  module's random stimulus and the auditor's two-seed re-run repeated
+  identical random tests [EVIDENCE: audit-mac_unit-formal-coverage]. Fixed
+  2026-09-18 (seeded_rng() from cocotb.RANDOM_SEED, the house style of
+  every later testbench); the fix has not been re-run, so the "two seeds"
+  clause of that row stays weak until a new verify row exists.
 - BMC depth is 20 cycles; behaviors requiring longer sequences (such as the
   511-term accumulation) are covered by simulation only. The 24-bit
   no-overflow bound is a paper proof (docs/uarch.md 3.2) checked by model
@@ -836,7 +848,11 @@ both auditors after the Phase 4 PIPE_ROM parameterization
 Simulation, default configuration (tb/online_softmax/test_online_softmax.py
 plus the Phase 3 coverage module test_softmax_coverage.py): 9 tests, all
 passing on two seeds, with 52/52 reachable functional bins hit and line
-coverage 99.3% against the 90% gate
+coverage above the 90% gate (the audit row quotes 99.3%; the coverage
+artifact that was tracked until 2026-09-18 read 1029/1030 line points with
+the sole miss the generated ROM default arm, now an explicit waiver in
+tb/online_softmax/coverage_waivers.txt; pre-2026-09-18 percentages were
+computed by a parser that pooled branch records, see EVIDENCE errata)
 [EVIDENCE: audit-online_softmax-pipe-formal-coverage]. The golden reference
 is imported DIRECTLY from model/attn.py (lut_index, rshr, gen_exp_lut), not
 re-derived, so the TB cannot drift from the model. The seven
@@ -931,10 +947,14 @@ long random rows.
 - Formal does not prove ROM contents, multiplier correctness, or the DEN
   induction bound; simulation carries those (see the split above). This is
   a documented toolchain-driven scope decision, not an oversight.
-- Line coverage is 99.3% for the default elaboration, not 100%; the known
-  unreachable point class (the generated ROM default arm) was verified dead
-  by construction in the original audit
-  [EVIDENCE: audit-online_softmax-formal-coverage].
+- Raw line coverage for the default elaboration is 1029/1030, not 100%;
+  the one unreachable point (the generated ROM default arm) was verified
+  dead by construction in the original audit
+  [EVIDENCE: audit-online_softmax-formal-coverage] and is now a declared
+  waiver (effective 100%). The PIPE_ROM = 1 run had no line-coverage gate
+  at all until 2026-09-18; it now excludes the ROM (already swept in the
+  default run) and is gated by `make coverage MODULE=online_softmax
+  PIPE_ROM=1`, not yet run.
 - Timing: the single-cycle path diff -> clamp -> index -> ROM ->
   (l * r multiply) -> rshr -> add is, as predicted in docs/uarch.md 8.2,
   the critical path of the whole design. Phase 4 measured it: the default
@@ -1091,32 +1111,76 @@ round-half-up bias of +8 = 2^3, saturation defensive only at D = 16
 PV (numerator) path: on lane L's out_valid (one cycle after in_valid, per
 online_softmax's own contract), lane L's 16-wide NUM bank updates in that
 one cycle, k-parallel. Because round-robin guarantees at most one lane fires
-out_valid per cycle, ONE shared 16-wide rescale-multiply-add datapath
-suffices; row_start travels from the in_valid cycle to the out_valid cycle
-in a one-cycle pipeline register per lane (row_start_d), mirroring
-online_softmax's internal row_start-to-l_base alignment, so a lane's NUM
-bank rebases to 0 on a row group's first element instead of accumulating the
-previous group's data. The per-(lane, k) update, pasted verbatim (from the
-g_num_lane/g_num_k generate in rtl/attention_top.sv):
+out_valid per cycle (asserted $onehot0 in the FORMAL block), ONE shared
+16-wide rescale-multiply-add datapath suffices: a lane select muxes the
+active lane's acc bank, r, w and row_start_d in front of 16 columns, and
+only that lane's bank registers the result. row_start travels from the
+in_valid cycle to the out_valid cycle in a one-cycle pipeline register per
+lane (row_start_d), mirroring online_softmax's internal row_start-to-l_base
+alignment, so a lane's NUM bank rebases to 0 on a row group's first element
+instead of accumulating the previous group's data.
+
+Structural correction (2026-09-18, review finding F001): the RTL revision
+verified in [EVIDENCE: verify-attention_top] put this arithmetic inside the
+per-(lane, k) generate loops, elaborating 64 acc*r and 64 w*v multipliers
+although only 16 of each could ever be active; the spec, this section and
+docs/benchmark.md all described the shared bank. The RTL now implements
+the shared bank below (arithmetic per column unchanged); it has not yet
+been re-verified. Pasted verbatim from the g_pv / g_num_lane generates in
+rtl/attention_top.sv:
 
 ```systemverilog
-      // rshr(acc_base * r, 15): 48-bit signed product (3.7/6.1), round-
-      // half-up bias then arithmetic shift; only the low 32 bits of the
-      // shifted value are kept (32'() cast), matching online_softmax's own
-      // l_resc truncation style (8.2) and trusted by the same 3.7 bound.
-      always_comb begin
-        acc_base = row_start_d[gL2] ? 32'sd0 : acc_num[gL2][gK];
-        ar_full  = 49'(signed'(acc_base) * signed'({1'b0, lane_r[gL2]}));
-        ar_rnd   = ar_full + 49'sd16384;
-        wv_prod  = 24'(signed'({1'b0, lane_w[gL2]}) * signed'(v_row_reg[8*gK+:8]));
-        if (lane_out_valid[gL2]) acc_next = 32'(ar_rnd >>> 15) + 32'(wv_prod);
-        else acc_next = acc_num[gL2][gK];
+  always_comb begin
+    pv_valid     = 1'b0;
+    pv_lane      = 2'd0;
+    pv_row_start = 1'b0;
+    pv_w         = '0;
+    pv_r         = '0;
+    // Priority order is defensive only: the drain protocol makes
+    // lane_out_valid one-hot-or-zero (asserted in the FORMAL block).
+    for (int li = 0; li < 4; li++) begin
+      if (lane_out_valid[li]) begin
+        pv_valid     = 1'b1;
+        pv_lane      = li[1:0];
+        pv_row_start = row_start_d[li];
+        pv_w         = lane_w[li];
+        pv_r         = lane_r[li];
       end
+    end
+  end
 
+  // The one shared 16-wide PV datapath: per column k,
+  //   acc_next = rshr(acc_base * r, 15) + w * v[k]
+  logic signed [31:0] pv_next [16];
+
+  for (genvar gK = 0; gK < 16; gK++) begin : g_pv
+    logic signed [31:0] acc_base;
+    logic signed [48:0] ar_full;
+    logic signed [48:0] ar_rnd;
+    logic signed [23:0] wv_prod;
+
+    // rshr(acc_base * r, 15): 48-bit signed product (3.7/6.1), round-
+    // half-up bias then arithmetic shift; only the low 32 bits of the
+    // shifted value are kept (32'() cast), matching online_softmax's own
+    // l_resc truncation style (8.2) and trusted by the same 3.7 bound.
+    always_comb begin
+      acc_base   = pv_row_start ? 32'sd0 : acc_num[pv_lane][gK];
+      ar_full    = 49'(signed'(acc_base) * signed'({1'b0, pv_r}));
+      ar_rnd     = ar_full + 49'sd16384;
+      wv_prod    = 24'(signed'({1'b0, pv_w}) * signed'(v_row_reg[8*gK+:8]));
+      pv_next[gK] = 32'(ar_rnd >>> 15) + 32'(wv_prod);
+    end
+  end
+
+  // State: the selected lane's bank takes pv_next; every other bank holds.
+  for (genvar gL2 = 0; gL2 < 4; gL2++) begin : g_num_lane
+    for (genvar gK2 = 0; gK2 < 16; gK2++) begin : g_num_k
       always_ff @(posedge clk) begin
-        if (rst) acc_num[gL2][gK] <= '0;
-        else acc_num[gL2][gK] <= acc_next;
+        if (rst) acc_num[gL2][gK2] <= '0;
+        else if (pv_valid && (pv_lane == gL2[1:0])) acc_num[gL2][gK2] <= pv_next[gK2];
       end
+    end
+  end
 ```
 
 v_row_reg is the V RAM's own registered read output; its read address is
@@ -1281,10 +1345,11 @@ Simulation (tb/attention_top/test_attention_top.py): 6 tests, all passing on
 two seeds, bit-exact end to end against model/attn.py attn_fixed
 [EVIDENCE: audit-attention_top-formal-coverage]:
 
-1. end_to_end_golden: full random N=64 inference, every output byte compared
-   against the golden model, cycle_count checked against the closed form.
-2. corners: directed extreme matrices (constant blocks, sign mixes, values
-   forcing rescales and the LUT zero tail) at multiple n_len values.
+1. end_to_end_golden: one seeded-random inference at each N in {4, 8, 16,
+   32, 64}, every output byte compared against the golden model,
+   cycle_count checked against the closed form, cycles.txt recorded.
+2. corners: all-zeros, all +127, all -128 and V-extremes with random Q/K at
+   n = 8, plus the crosscheck monotonic-score stress pattern at n = 16.
 3. multi_run_no_reset: consecutive runs without reset between them prove no
    stale state leaks across runs (the load-before-use and row_start_d
    rebasing contracts).
@@ -1295,19 +1360,41 @@ two seeds, bit-exact end to end against model/attn.py attn_fixed
 6. write_port_readback: the load port and the registered read port honor
    their address/latency contracts.
 
+Added 2026-09-18 (review finding L17), NOT yet run: nonpow2_group_counts
+(n_len 12, 20, 36: the odd group counts the power-of-two set never
+exercised), start_while_busy_ignored, sel3_write_ignored, and
+test_zz_coverage_closure, which writes tb/attention_top/func_coverage.txt
+from a 22-bin functional coverage model (n_len classes, control corners,
+input/output extremes, readback) that the coverage gate now consumes.
+
 Line coverage: the check_coverage.py gate passed inside make verify, and the
 formal-coverage auditor confirmed every missed point is
 unreachable-defensive code [EVIDENCE: audit-attention_top-formal-coverage].
-Raw counters: tb/attention_top/coverage.dat. The exp_lut.svh ROM lines are
+Correction (2026-09-18, review finding F004): that gate pooled branch and
+line records; the tracked artifact's true LINE coverage was 46/53 = 86.8%,
+below the 90% threshold, and passed only as 144/151 = 95.4% pooled. The
+seven unhit lines are exactly the defensive saturation arms and `default:`
+case arms the auditor called unreachable; they are now declared waivers
+(tb/attention_top/coverage_waivers.txt) and the parser counts t=line only,
+so the effective figure is 46/46 with the raw figure printed beside it.
+Raw counters: tb/attention_top/coverage.dat (generated, no longer tracked).
+The exp_lut.svh ROM lines are
 excluded from this module's instrumentation by tb/attention_top/coverage.vlt
 because the ROM is already exhaustively swept and equivalence-proven
 standalone in tb/online_softmax (the .vlt file documents the rationale).
 
-Formal (formal/attention_top.sby: BMC depth 10, smtbmc yices,
-reset-assumed): PASS with 7 assertions and 1 assumption, audited non-vacuous
-[EVIDENCE: audit-attention_top-formal-coverage]; runtime 2.8 s after the
-BRAM conversion (down from about 60 s)
-[EVIDENCE: bram-conversion-attention_top]. Scope is control-only per the
+Formal (formal/attention_top.sby): the verified revision ran one BMC task
+at depth 10, smtbmc yices, reset-assumed, PASS with 7 assertions and 1
+assumption [EVIDENCE: audit-attention_top-formal-coverage], 2.8 s after the
+BRAM conversion [EVIDENCE: bram-conversion-attention_top]. Correction
+(2026-09-18, review finding F013): the shortest run is 173 cycles, so at
+depth 10 `done` is never 1 in any trace and the "done implies idle"
+property and the done half of busy/done exclusion were proven VACUOUSLY;
+the "non-vacuous" wording in that row was wrong for them (EVIDENCE errata).
+The .sby now has a `prove` task at depth 180 with n_len assumed 4 on the
+accepted start, a `cover` task that must reach `cover (done)`, and an
+added $onehot0(lane_out_valid) assertion; neither task has been run yet
+and its runtime is unknown. Scope is control-only per the
 project's formal-is-a-subset rule: reset state (S_IDLE, busy=0, done=0,
 cycle_count=0), busy/done mutual exclusion, done implies idle, cycle_count
 monotone non-decreasing while busy. None of the properties reference the
@@ -1365,13 +1452,16 @@ view:
   runs, minus the measured 1.154 ms process floor. Compute-only estimates:
   82 us (N=16), 140 us (N=32), 275 us (N=64); at N = 4 and 8 the
   subtraction is inside measurement noise and no number is claimed.
-- Utilization view (derived, clock-free): one N=64 inference performs
-  2 * 64^2 * 16 = 131072 MACs on the Q.K^T side plus the same on the PV
-  side, about 262144 MACs in 6593 cycles = 39.8 sustained MAC/cycle against
-  32 instantiated multipliers (16 tile + 16 PV), i.e. the multiply datapath
-  is over 100% occupied while compute and drain overlap, with the gap to
-  the ideal coming from the 156-cycle per-group tail (S_DRAIN_LAST +
-  S_DIVIDE).
+- Utilization view (derived, clock-free; corrected 2026-09-18, review
+  finding M1: the earlier figure counted multiply and add as two MACs and
+  concluded "over 100% busy", which is impossible): one N=64 inference
+  performs 64^2 * 16 = 65536 MACs on the Q.K^T side plus 65536 on the PV
+  side, 131072 MACs in 6593 cycles = 19.9 sustained MAC/cycle. The engine
+  holds 48 multipliers (16 tile, 16 acc*r, 16 w*v); against the 32 that
+  perform golden-model MACs that is 62% utilization. The gap comes from the
+  156-cycle per-group tail (S_DRAIN_LAST + S_DIVIDE) and from the PV side
+  idling during block 0 of each group. The run excludes the 3 * N * D =
+  3072-cycle byte-serial load (docs/benchmark.md).
 
 Honest caveats, in order of importance: (1) the CPU baseline is the
 reference model written for bit-exactness (int64 arithmetic, asserts on),
@@ -1379,11 +1469,12 @@ not a tuned int8 kernel; the table demonstrates cycle economy, not victory
 over optimized CPU software. (2) Converting cycles to wall time needs a
 clock, and NO attention_top netlist has been through STA; only cycle counts
 and CPU milliseconds are measurements. docs/benchmark.md's illustrative
-times use a 44 MHz figure from a pre-closure Phase 4 infrastructure smoke
-run; the signed-off Phase 4 tool estimates for the standalone online_softmax
-core (the design's timing limiter) are 38.5 MHz naive and 76.9 MHz pipelined
-(section 9.4), and neither number has been established for the integrated
-top. (3) Accelerator cycles grow with N^2 like the CPU's; the constant
+times use the signed-off Phase 4 tool estimates for the standalone
+online_softmax core, 38.5 MHz naive and 76.9 MHz pipelined (section 9.4);
+an earlier revision of that file quoted 44 MHz from a pre-closure smoke run
+and is superseded. Neither number has been established for the integrated
+top, and calling online_softmax "the design's timing limiter" remains an
+inference from the block-level runs until a top-level STA exists. (3) Accelerator cycles grow with N^2 like the CPU's; the constant
 factor and the deterministic latency are the story.
 
 ### 7.9 Known gaps
@@ -1396,9 +1487,11 @@ factor and the deterministic latency are the story.
   bit-exact end-to-end simulation against attn_fixed.
 - The divide phase is not overlapped with the next group's compute
   (documented future optimization, docs/uarch.md 8.3).
-- docs/verification_plan.md sections about attention_top were written
-  before its verify landed and remain in plan voice there; this guide and
-  EVIDENCE.md carry the result claims.
+- docs/verification_plan.md was refreshed 2026-09-18 to the ledger state
+  (it had still described attention_top as unverified and the exact-max
+  property as planned).
+- The 2026-09-18 shared-PV rewrite and the depth-180 formal tasks are not
+  yet re-verified (see the review note in section 1).
 
 ## 8. Phase 3 closure: functional coverage and the exact-max property
 
@@ -1758,7 +1851,14 @@ auditors invoking sby directly (each audit row's command column lists the
 sby re-run), and the standalone sby runs of Phases 3 and 4 are their own
 evidence [EVIDENCE: phase3-closure], [EVIDENCE: phase4-sta]. What the fix
 changes is the gate itself: from this commit on, `make verify` genuinely
-executes the formal leg instead of skipping it.
+executes the formal leg instead of skipping it. The verify-* rows appended
+BEFORE the fix (verify-tool_smoke, verify-mac_unit, verify-matmul_tile,
+the first verify-online_softmax, both verify-attention_top) nevertheless
+say "passes lint/sim/cov/synth/formal"; the ledger is append-only, so an
+erratum row at its end names them (2026-09-18, review finding M2). A
+second gate hole was found in the same review: the synth-check recipe
+piped yosys into tee without pipefail, so a yosys failure could not fail
+the target (review finding H2, fixed in the Makefile).
 
 ## 10. Phase 5: switching-activity power proxy and the tradeoff writeup
 
@@ -1892,7 +1992,7 @@ matching the closed-form cycle model exactly]."
 
 | Clause | Evidence |
 |--------|----------|
-| end-to-end bit-exact, verify green, countersigned | [EVIDENCE: verify-attention_top], [EVIDENCE: audit-attention_top-lint-synth], [EVIDENCE: audit-attention_top-formal-coverage] |
+| end-to-end bit-exact, verify green, countersigned (for the revision before the 2026-09-18 shared-PV rewrite; re-verification pending) | [EVIDENCE: verify-attention_top], [EVIDENCE: audit-attention_top-lint-synth], [EVIDENCE: audit-attention_top-formal-coverage] |
 | BRAM conversion numbers, bit-identical | [EVIDENCE: bram-conversion-attention_top] |
 | cycle counts vs closed form | tb/attention_top/cycles.txt, [EVIDENCE: audit-attention_top-formal-coverage] |
 
@@ -1945,10 +2045,11 @@ make verify MODULE=attention_top
 make lint        MODULE=online_softmax
 make sim         MODULE=online_softmax SEED=1
 make sim         MODULE=online_softmax SEED=7   # different stimulus, same pass
-make coverage
+make coverage    MODULE=online_softmax          # line (t=line only, waivers) + func gate
+make coverage    MODULE=online_softmax PIPE_ROM=1   # the PIPE_ROM=1 artifact
 make synth-check MODULE=online_softmax          # writes build/synth.log
 make formal      MODULE=online_softmax          # runs BOTH sby tasks (p0, p1)
-sby -f formal/attention_top.sby                 # integration BMC, yices, ~3 s
+sby -f formal/attention_top.sby                 # prove (depth 180) + cover tasks
 
 # PIPE_ROM = 1 simulation (artifact-isolated, latency-2 test module)
 make -C tb/online_softmax PIPE_ROM=1 SEED=1 MODULE=
@@ -1956,16 +2057,15 @@ make -C tb/online_softmax PIPE_ROM=1 SEED=1 MODULE=
 # Phase 4: sky130 netlists + OpenSTA (LIB defaults to the tt liberty file)
 make synth-netlist MODULE=online_softmax
 make sta           MODULE=online_softmax PERIOD_NS=26   # met: slack +0.426
-yosys -p 'read_verilog -sv -defer rtl/online_softmax.sv; \
-  chparam -set PIPE_ROM 1 online_softmax; hierarchy -top online_softmax; \
-  synth -top online_softmax; dfflibmap -liberty $LIB; abc -liberty $LIB; \
-  opt_clean; stat -liberty $LIB; \
-  write_verilog -noattr build/online_softmax_pipe1_netlist.v'
-LIB=$LIB NETLIST=build/online_softmax_pipe1_netlist.v MODULE=online_softmax \
-  PERIOD_NS=13 opensta -no_init scripts/sta.tcl    # met: slack +0.336
+make synth-netlist-pipe1                                # PIPE_ROM=1 netlist
+make sta-pipe1     PERIOD_NS=13                         # met: slack +0.336
 
-# Phase 4: gate-level simulation of both netlists (spec-derived vectors)
-make -C tb/gls all      # expect "GLS PASS: 546 cycles checked, 0 errors" x2
+# Phase 4: gate-level simulation of both netlists (spec-derived vectors);
+# `make gls` builds both netlists first, then runs tb/gls
+make gls                # expect "GLS PASS: 546 cycles checked, 0 errors" x2
+
+# Snapshot the build/ reports an EVIDENCE row cites into the tracked tree
+make evidence-snapshot
 
 # Phase 5: toggle counts + calibrated power proxy
 python3 scripts/toggle_count.py build/gls_lat1.vcd build/gls_lat2.vcd

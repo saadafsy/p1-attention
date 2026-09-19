@@ -1,14 +1,14 @@
 # Verification plan: Streaming Attention Engine
 
 Status of this document: Phase 5 deliverable (P1_Attention_Engine_Build_Sheet.md,
-PHASE 5), retroactively formalized. mac_unit, matmul_tile, and online_softmax were
-built and verified first (Phase 1); this document writes down, as a living plan, the
-strategy that already produced their EVIDENCE.md PASS rows, and states the plan (not
-yet a result) for attention_top, which is still in progress. Every claim about a
-completed module cites an EVIDENCE.md row id in brackets, for example
-[EVIDENCE: verify-mac_unit]. Claims about attention_top are written in plan voice only,
-because no EVIDENCE.md row exists for it yet; see section 6. No em dashes are used
-anywhere in this file, per the project docs rule.
+PHASE 5), retroactively formalized, refreshed 2026-09-18 to the ledger state (the
+previous revision still described attention_top as unverified and the exact-max
+property as planned; review finding M3/F006). All four RTL modules have verify-green
+EVIDENCE.md rows and dual auditor countersigns; every claim about a completed module
+cites an EVIDENCE.md row id in brackets, for example [EVIDENCE: verify-mac_unit].
+Where the 2026-09-18 review changed a gate or a proof, the section says what was
+measured before and what the gate now requires. No em dashes are used anywhere in
+this file, per the project docs rule.
 
 ## 1. Features under verification, per module
 
@@ -45,14 +45,16 @@ code is the bug (docs/uarch.md, header).
 | row_start basis override and back-to-back row issue with no dead cycle | 8.2 |
 | Rescale identities: r = 0x8000 is an exact identity; first-element state is exact | 6.1 |
 
-### 1.4 attention_top (in progress, no EVIDENCE row yet; plan only, see section 6)
+### 1.4 attention_top ([EVIDENCE: verify-attention_top], [EVIDENCE: audit-attention_top-lint-synth], [EVIDENCE: audit-attention_top-formal-coverage])
 
-| Feature (planned) | uarch.md section |
-|--------------------|-------------------|
+| Feature | uarch.md section |
+|---------|-------------------|
 | End-to-end recurrence vs model/attn.py attn_fixed, bit-exact | 8.3, 6 |
 | FSM: S_IDLE / S_COMPUTE / S_DRAIN_LAST / S_DIVIDE, busy/done contract, cycle_count formula | 8.3 |
 | Round-robin drain addressing and drain_buf same-edge capture (the d=15 correction) | 8.3 |
 | Output divider bank: 3.8 algorithm, sign correction, sat8 | 3.8, 8.3 |
+| Shared 16-wide PV datapath driven by a one-hot lane select (2026-09-18 rewrite, re-verification pending) | 8.3 |
+| n_len contract corners: non-power-of-two group counts, sel=3, start-while-busy (tests added 2026-09-18, not yet run) | 8.3 |
 
 ## 2. Stimulus strategy
 
@@ -111,12 +113,12 @@ from `cocotb.RANDOM_SEED` (a `seeded_rng()` helper, one per testbench file) so t
 sequence. Verify runs a module on two genuinely different seeds before it is
 considered green.
 
-mac_unit is the one documented exception, and the gap is carried forward honestly
-rather than hidden: its testbench RNGs are fixed literals, `random.Random(2)` and
-`random.Random(3)`, so the Makefile's `SEED` variable does not change mac_unit's
-random stimulus; the auditor's two-seed re-run for mac_unit therefore repeated
-identical random tests [EVIDENCE: audit-mac_unit-formal-coverage]. The finding was
-fixed in every later testbench: tb/matmul_tile/test_matmul_tile.py and
+mac_unit was the one documented exception: its testbench RNGs were fixed literals,
+`random.Random(2)` and `random.Random(3)`, so the Makefile's `SEED` variable did not
+change mac_unit's random stimulus and the auditor's two-seed re-run repeated
+identical random tests [EVIDENCE: audit-mac_unit-formal-coverage]. Fixed 2026-09-18
+(seeded_rng() in tb/mac_unit/test_mac_unit.py), not yet re-run. The finding had
+already been fixed in every later testbench: tb/matmul_tile/test_matmul_tile.py and
 tb/online_softmax/test_online_softmax.py both build every RNG as
 `random.Random(cocotb.RANDOM_SEED)` inside a `seeded_rng()` helper (with a fallback
 only if the attribute is somehow absent), documented in each file's own module
@@ -150,10 +152,11 @@ reimplementing the arithmetic:
   and `start_and_reset` from test_online_softmax and states in its own docstring that
   "the coverage model below only OBSERVES the values that check already computed, it
   does not weaken or replace it."
-- tb/attention_top (in progress): the planned checker is `model/attn.py`'s
-  `attn_fixed`, "the SAME bit-exact golden reference used by tb/online_softmax and
-  model/crosscheck.py. No re-derivation of the recurrence here: attn_fixed IS the
-  contract" (module docstring, tb/attention_top/test_attention_top.py).
+- tb/attention_top: the checker is `model/attn.py`'s `attn_fixed`, "the SAME
+  bit-exact golden reference used by tb/online_softmax and model/crosscheck.py. No
+  re-derivation of the recurrence here: attn_fixed IS the contract" (module
+  docstring, tb/attention_top/test_attention_top.py), applied to every output byte
+  of every run [EVIDENCE: audit-attention_top-formal-coverage].
 
 Every checker does an every-cycle comparison, not just an end-of-transaction check:
 tb/mac_unit's `random_control_fuzz` and tb/matmul_tile's `random_control_fuzz` compare
@@ -170,22 +173,33 @@ cannot mask an RTL width bug or vice versa.
 
 ## 4. Coverage goals and actuals
 
-Line coverage gate: `scripts/check_coverage.py --line 90 --func 100` (from the
-Makefile's `coverage` target), invoked by `make coverage` inside `make verify`. The
-gate requires line coverage >= 90% and full functional-bin closure (100% of the
+Line coverage gate: `scripts/check_coverage.py --line 90 --func 100 --module M`
+(from the Makefile's `coverage` target), invoked inside `make verify`. The gate
+requires line coverage >= 90% and full functional-bin closure (100% of the
 functional model that exists for a module, or every miss documented-unreachable).
 
-| Module | Line coverage (actual) | Source |
-|--------|--------------------------|--------|
-| mac_unit | 100% (8/8 instrumented points hit) | tb/mac_unit/coverage.dat [EVIDENCE: audit-mac_unit-formal-coverage] |
-| matmul_tile | 100% | tb/matmul_tile/coverage.dat [EVIDENCE: audit-matmul_tile-formal-coverage] |
-| online_softmax | 99.9% (1044 of 1045 points hit) | tb/online_softmax/coverage.dat [EVIDENCE: audit-online_softmax-formal-coverage] |
+Gate correction (2026-09-18, review finding F004): until that date the script
+counted every verilator `C` record, pooling `t=branch` points into the "line"
+percentage. Re-parsed with `t=line` only, the artifacts that were tracked at the
+time read:
 
-The online_softmax 99.9% figure is not a shortfall waved off: the sole miss is the
-generated default arm of the `exp_lut_rom` case statement, which a fully enumerated
-10-bit index (1024 case arms) can never select, so the arm is dead by construction.
-This was independently re-verified by the formal-coverage auditor
-[EVIDENCE: audit-online_softmax-formal-coverage].
+| Module | Line points (t=line only) | Branch points | Pooled figure the old gate printed |
+|--------|---------------------------|---------------|------------------------------------|
+| mac_unit | 2/2 | 6/6 | 8/8 = 100% |
+| matmul_tile | 2/2 | 6/6 | 8/8 = 100% |
+| online_softmax (default) | 1029/1030 | 16/16 | 1045/1046 = 99.9% |
+| attention_top | 46/53 = 86.8% | 98/98 | 144/151 = 95.4% |
+
+attention_top's true line coverage was therefore BELOW the 90% gate and passed only
+by pooling. Its seven unhit lines are the defensive saturation arms and the
+`default:` case arms the auditor had already judged unreachable
+[EVIDENCE: audit-attention_top-formal-coverage]; they are now declared, one per
+line with a reason, in tb/attention_top/coverage_waivers.txt, and the gate prints
+raw, waived and effective figures (effective 46/46). The online_softmax miss (the
+generated ROM default arm, dead by construction because a 10-bit index is fully
+enumerated by 1024 case arms [EVIDENCE: audit-online_softmax-formal-coverage]) is
+likewise a declared waiver. Waivers that match no unhit point fail the gate, so they
+cannot rot. coverage.dat files are generated per run and no longer tracked.
 
 Functional closure, per module:
 
@@ -200,8 +214,16 @@ Functional closure, per module:
   module is defined as: every reachable bin hit, every unreachable bin named and
   proven unreachable (not merely unhit), and zero bins in the "unhit reachable"
   category.
-- attention_top: no coverage model exists yet; this is future work for when the
-  module reaches verify-green (section 6).
+- attention_top: a 22-bin functional model was added 2026-09-18 (n_len classes
+  including the non-power-of-two counts 12/20/36, control corners: back-to-back
+  runs, mid-run reset, start-while-busy ignored, sel=3 ignored; input/output
+  extremes; readback), observed from stimulus and outputs and written to
+  tb/attention_top/func_coverage.txt by the last test, gated with --func 100. It has
+  not yet been run; until it has, this row states the model, not a closure result.
+- PIPE_ROM = 1 (online_softmax): its 6 structural bins are now recorded from observed
+  mirror state on every cycle (they were unconditional hit() calls before
+  2026-09-18, review finding M7), and the run's own line-coverage artifact is gated
+  with the ROM excluded (it is swept in the default run); neither has been re-run.
 
 ## 5. Formal strategy
 
@@ -243,21 +265,27 @@ pre-clamp and final LUT indices in their declared ranges); reset state
 (`m == -32768`, `l == 0`, `out_valid == 0`); hold behavior when `in_valid` was low
 (state unchanged, no stale `out_valid` pulse); `out_valid` rises exactly one cycle
 after each accepted element; on a `row_start` step `m` becomes exactly the incoming
-`s` (identity 2); otherwise `m` is monotonic non-decreasing within a row. NOT proven:
+`s` (identity 2); otherwise `m` equals the exact max recurrence
+`m == ($past(s) >= $past(m)) ? $past(s) : $past(m)` (the Phase 3 exact-max property,
+which strictly subsumes the retained monotonicity assert [EVIDENCE: phase3-closure]).
+Task p1 proves the same for the PIPE_ROM = 1 elaboration plus the latency-2 port
+alignment [EVIDENCE: audit-online_softmax-pipe-formal-coverage]. NOT proven:
 ROM contents, the 40-bit multiply's numerical correctness, or the DEN no-overflow
 induction bound; those are cocotb's job (`rom_full_sweep`, `full_row_golden_compare`,
 and the DEN assert inside `softmax_step()`) [EVIDENCE: verify-online_softmax],
 [EVIDENCE: audit-online_softmax-formal-coverage].
 
-**attention_top** (formal/attention_top.sby exists in the repo; BMC depth 10, smtbmc
-z3; PLANNED scope, no EVIDENCE row yet, see section 6): the property list is
-control-only, per the .sby header comment and docs/uarch.md 8.3's own "FORMAL block"
-paragraph: reset state (`S_IDLE`, `busy=0`, `done=0`, `cycle_count=0`), busy/done
-mutual exclusion, done implies idle, `cycle_count` monotone non-decreasing while busy.
-None of these properties reference `q_mem`/`k_mem`/`v_mem`/`out_mem`, the NUM
-accumulators, the score/rescale arithmetic, or the divider bank, because the control
-FSM's transition conditions depend only on counters (`t`, `kb`, `rg`, `row`,
-`div_cnt`) and `start`, never on datapath values.
+**attention_top** (formal/attention_top.sby, smtbmc yices; z3 hangs on this
+memory-heavy model): the property list is control-only, per the .sby header comment
+and docs/uarch.md 8.3's own "FORMAL block" paragraph: reset state (`S_IDLE`,
+`busy=0`, `done=0`, `cycle_count=0`), busy/done mutual exclusion, done implies idle,
+`cycle_count` monotone non-decreasing while busy, and (2026-09-18) lane_out_valid
+one-hot-or-zero. The verified revision ran at BMC depth 10 from an assumed reset
+[EVIDENCE: audit-attention_top-formal-coverage]. Correction (2026-09-18, review
+finding F013): the shortest run is 173 cycles, so at depth 10 `done` can never be 1
+and the done-based properties were proven vacuously; the .sby now runs a `prove`
+task at depth 180 with `n_len` assumed 4 on the accepted start, and a `cover` task
+that must reach `cover (done)`. Neither task has been run yet.
 
 ### 5.3 The chformal reductions, and their justification chain
 
@@ -266,13 +294,12 @@ FSM's transition conditions depend only on counters (`t`, `kb`, `rg`, `row`,
 | formal/matmul_tile.sby | `mac_unit` | The 16 mac_unit instances are wired identically by the same generate body; the contract is already proven standalone at depth 20 (formal/mac_unit.sby, PASS, auditor-countersigned). Re-proving 16 replicated copies of an identical contract inside the tile-level BMC is redundant solver load for zero additional coverage. |
 | formal/attention_top.sby | `mac_unit`, `matmul_tile`, `online_softmax` | All three submodules are instantiated in attention_top UNMODIFIED (docs/uarch.md 8.3's own words); each contract is already proven standalone and auditor-countersigned (formal/mac_unit.sby, formal/matmul_tile.sby, formal/online_softmax.sby, all PASS). Re-proving them again inside the integration-level BMC would be redundant for zero additional coverage, and the full unstripped netlist (3 RAMs, a ROM, 16+16 multipliers, a 16-wide divider bank, plus the three submodules' own BMC-heavy assertions) is stated in the .sby header to be "far past what open smtbmc/z3 proves in a reasonable budget." |
 
-The matmul_tile reduction was independently audited: the formal-coverage auditor
-re-ran the proof, inspected the generated SMT2 to confirm the remaining assertions
-are non-vacuous, and countersigned the reduction as justified
-[EVIDENCE: audit-matmul_tile-formal-coverage]. The attention_top reduction has not
-yet been through an equivalent audit pass because the module is not yet
-verify-green (section 6); auditing that reduction is part of the sign-off gate that
-remains to be run.
+Both reductions were independently audited: the formal-coverage auditor re-ran the
+proofs, inspected the generated SMT2, and countersigned them as justified
+[EVIDENCE: audit-matmul_tile-formal-coverage],
+[EVIDENCE: audit-attention_top-formal-coverage]; for attention_top the
+"non-vacuous" verdict holds for the reset, exclusion and monotonicity properties but
+not for the done-based ones at the depth then used (see 5.2 and the EVIDENCE errata).
 
 ### 5.4 Accepted gaps
 
@@ -286,8 +313,9 @@ remains to be run.
 - online_softmax: formal does not prove ROM contents, multiplier correctness, or the
   DEN induction bound (section 5.2)
   [EVIDENCE: audit-online_softmax-formal-coverage].
-- PLANNED, not done: an exact-max property. Today the three width/overflow bounds
-  that matter most (mac_unit's SACC bound at D <= 511, docs/uarch.md 3.2; the DEN
+- The exact-max property for `m` is DONE (Phase 3, [EVIDENCE: phase3-closure]). Still
+  planned: machine-checked induction for the width bounds. Today the three
+  width/overflow bounds that matter most (mac_unit's SACC bound at D <= 511, docs/uarch.md 3.2; the DEN
   induction bound, docs/uarch.md 3.6; the NUM bound, docs/uarch.md 3.7) are each a
   paper derivation, checked at runtime by an assert in both golden models, and pinned
   by a directed simulation test that walks up to the exact width-wrap boundary (for
@@ -321,51 +349,40 @@ Done"):
    moves a task to [Done], and only after: make verify exits 0, an EVIDENCE row
    exists, a Beta auditor countersigned, AND I passed 'grill me'."
 
-Applied to the modules built so far: mac_unit, matmul_tile, and online_softmax have
-all cleared steps 1 to 3 [EVIDENCE: verify-mac_unit],
-[EVIDENCE: audit-mac_unit-lint-synth], [EVIDENCE: audit-mac_unit-formal-coverage],
-[EVIDENCE: verify-matmul_tile], [EVIDENCE: audit-matmul_tile-lint-synth],
-[EVIDENCE: audit-matmul_tile-formal-coverage], [EVIDENCE: verify-online_softmax],
-[EVIDENCE: audit-online_softmax-lint-synth],
-[EVIDENCE: audit-online_softmax-formal-coverage].
+Applied to the modules built so far: all four have cleared steps 1 to 3
+[EVIDENCE: verify-mac_unit], [EVIDENCE: audit-mac_unit-lint-synth],
+[EVIDENCE: audit-mac_unit-formal-coverage], [EVIDENCE: verify-matmul_tile],
+[EVIDENCE: audit-matmul_tile-lint-synth], [EVIDENCE: audit-matmul_tile-formal-coverage],
+[EVIDENCE: verify-online_softmax], [EVIDENCE: audit-online_softmax-lint-synth],
+[EVIDENCE: audit-online_softmax-formal-coverage], [EVIDENCE: verify-attention_top],
+[EVIDENCE: audit-attention_top-lint-synth],
+[EVIDENCE: audit-attention_top-formal-coverage]; none has cleared step 4. Caveat for
+every verify row appended before the 2026-07-16 .PHONY fix: `make formal` was
+silently skipped by make at the time, so those rows' "formal" clause rests on the
+auditors' direct sby runs, not on the verify target (EVIDENCE errata).
 
-### 6.1 attention_top (plan only; verification is in flight)
+### 6.1 attention_top: what was checked, and what re-verification is owed
 
-No EVIDENCE.md row exists for attention_top and no result is claimed about it in this
-document. The repo already contains a testbench under development
-(tb/attention_top/test_attention_top.py) and a formal setup
-(formal/attention_top.sby); this section states the PLAN those artifacts are built
-toward, not an outcome.
+The planned checks below all landed and passed for the revision recorded in
+[EVIDENCE: verify-attention_top] and [EVIDENCE: audit-attention_top-formal-coverage]
+(6/6 tests on two seeds, bit-exact end to end):
 
-The plan, once the module reaches verify-green, is to check:
+- End-to-end golden compare across n in {4, 8, 16, 32, 64} with cycle-formula
+  equality (test `end_to_end_golden`); corners (`corners`); mid-run reset
+  (`rst_mid_run`); back-to-back runs without reset (`multi_run_no_reset`); random
+  regression; write-port/read-port contracts (`write_port_readback`).
+- Control-only formal with the three-way chformal reduction of 5.2/5.3.
 
-- **End-to-end golden compare across n in {4, 8, 16, 32, 64}**: one seeded-random
-  case per size, full N x D output compare, bit-exact against `model/attn.py
-  attn_fixed`, in the same test that also checks cycle-formula equality (planned
-  test `end_to_end_golden`).
-- **Cycle-formula equality**: `cycle_count` checked against the closed-form
-  `nblk*(16*nblk+156)+1` (docs/uarch.md 8.3) on every run, not only at n = 64, per
-  the module's own `cycle_formula()` helper.
-- **Corners**: all-zeros, all +127, all -128, V-extremes with random Q/K, and the
-  `monotonic_case` stimulus from model/crosscheck.py (the same max-update stress
-  pattern used to gate the golden models themselves, now driven through the whole
-  integrated stack) (planned test `corners`).
-- **Mid-run reset**: `rst` asserted 300 cycles into an n = 64 (6593-cycle) run, then
-  checking the FSM returns to idle (`busy` drops, `done` stays low, `cycle_count`
-  clears) and that a subsequent clean run still computes bit-exactly (planned test
-  `rst_mid_run`).
-- **Back-to-back runs**: two different cases run without an intervening `rst`,
-  checking that all state (RAMs, each lane's online_softmax (m, l) state, the NUM
-  accumulators, and the FSM's own counters) fully reinitializes from the start pulse
-  alone (planned test `multi_run_no_reset`).
-- **Formal, control-only, inner-module asserts stripped**: the property list and the
-  three-way chformal reduction of section 5.2/5.3, over `formal/attention_top.sby`.
+Owed after the 2026-09-18 review (PLAN.md row back to [Building] until done):
 
-Sign-off for attention_top follows the same four-step gate as section 6: `make
-verify MODULE=attention_top` exit 0, an EVIDENCE.md PASS row, dual auditor
-countersign, and the user's Mode-B replication grill, in that order. Until step 1
-happens, PLAN.md's row for attention_top stays [Todo]/[Building] and this document
-makes no claim that any of the planned checks above currently passes.
+- Re-run `make verify MODULE=attention_top` on the shared-PV RTL (docs/uarch.md 8.3
+  implementation note) on two seeds, which also exercises the four added tests
+  (`nonpow2_group_counts`, `start_while_busy_ignored`, `sel3_write_ignored`,
+  `test_zz_coverage_closure`) and the new functional coverage gate.
+- Run the depth-180 `prove` and `cover` formal tasks and record the achieved depth
+  and runtime.
+- Re-synthesize and confirm the multiplier count dropped to the 48 the spec states.
+- Append the resulting rows with unique ids and re-run the dual auditor countersign.
 
 ## 7. The sandbox/silicon wall, for hardware phases
 

@@ -1,0 +1,2 @@
+# Documented-unreachable line-coverage points for online_softmax.
+exp_lut.svh:1032 generated default arm of exp_lut_rom: a 10-bit index is fully enumerated by the 1024 case arms (verified unreachable, EVIDENCE audit-online_softmax-formal-coverage)

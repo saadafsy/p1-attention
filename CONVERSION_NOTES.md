@@ -1,4 +1,4 @@
-# P1 conversion — builder mode with a post-build replication tutor
+# P1 conversion: builder mode with a post-build replication tutor
 
 ## Decision recorded
 Agents BUILD the full P1 result. After it is green, the technical-writer runs MODE B

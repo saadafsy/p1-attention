@@ -387,34 +387,76 @@ module attention_top (
   end
 
   // ---------------------------------------------------------------------
-  // NUM accumulators (rounding site 4, uarch.md 3.7/6.1): 4 lanes x 16 k.
+  // NUM accumulators (rounding site 4, uarch.md 3.7/6.1): 4 lanes x 16 k of
+  // STATE, updated through ONE shared 16-wide PV datapath (uarch.md 8.3:
+  // "instantiated once and driven by whichever lane's out_valid is
+  // currently high"). Round-robin draining guarantees at most one lane's
+  // out_valid per cycle, so a lane select + operand mux in front of a
+  // single bank of 16 rescale-multiply-add columns is exact.
+  //
+  // Rewritten 2026-09-18 (review finding F001/F007): the previous version
+  // put the full ar_full/wv_prod arithmetic inside the per-(lane, k)
+  // generate loops, elaborating 64 acc*r and 64 w*v multipliers although
+  // only 16 of each could ever be active; the spec, the benchmark's
+  // "16 PV" resource count and the area rationale all described the
+  // shared bank. The arithmetic per column is unchanged bit for bit.
   // ---------------------------------------------------------------------
   logic signed [31:0] acc_num [4][16];
 
-  for (genvar gL2 = 0; gL2 < 4; gL2++) begin : g_num_lane
-    for (genvar gK = 0; gK < 16; gK++) begin : g_num_k
-      logic signed [31:0] acc_base;
-      logic signed [48:0] ar_full;
-      logic signed [48:0] ar_rnd;
-      logic signed [23:0] wv_prod;
-      logic signed [31:0] acc_next;
+  logic        pv_valid;      // some lane's out_valid is high this cycle
+  logic [1:0]  pv_lane;       // which lane (round-robin: at most one)
+  logic        pv_row_start;  // that lane's pipelined row_start
+  logic [15:0] pv_w;          // that lane's registered w, r
+  logic [15:0] pv_r;
 
-      // rshr(acc_base * r, 15): 48-bit signed product (3.7/6.1), round-
-      // half-up bias then arithmetic shift; only the low 32 bits of the
-      // shifted value are kept (32'() cast), matching online_softmax's own
-      // l_resc truncation style (8.2) and trusted by the same 3.7 bound.
-      always_comb begin
-        acc_base = row_start_d[gL2] ? 32'sd0 : acc_num[gL2][gK];
-        ar_full  = 49'(signed'(acc_base) * signed'({1'b0, lane_r[gL2]}));
-        ar_rnd   = ar_full + 49'sd16384;
-        wv_prod  = 24'(signed'({1'b0, lane_w[gL2]}) * signed'(v_row_reg[8*gK+:8]));
-        if (lane_out_valid[gL2]) acc_next = 32'(ar_rnd >>> 15) + 32'(wv_prod);
-        else acc_next = acc_num[gL2][gK];
+  always_comb begin
+    pv_valid     = 1'b0;
+    pv_lane      = 2'd0;
+    pv_row_start = 1'b0;
+    pv_w         = '0;
+    pv_r         = '0;
+    // Priority order is defensive only: the drain protocol makes
+    // lane_out_valid one-hot-or-zero (asserted in the FORMAL block).
+    for (int li = 0; li < 4; li++) begin
+      if (lane_out_valid[li]) begin
+        pv_valid     = 1'b1;
+        pv_lane      = li[1:0];
+        pv_row_start = row_start_d[li];
+        pv_w         = lane_w[li];
+        pv_r         = lane_r[li];
       end
+    end
+  end
 
+  // The one shared 16-wide PV datapath: per column k,
+  //   acc_next = rshr(acc_base * r, 15) + w * v[k]
+  logic signed [31:0] pv_next [16];
+
+  for (genvar gK = 0; gK < 16; gK++) begin : g_pv
+    logic signed [31:0] acc_base;
+    logic signed [48:0] ar_full;
+    logic signed [48:0] ar_rnd;
+    logic signed [23:0] wv_prod;
+
+    // rshr(acc_base * r, 15): 48-bit signed product (3.7/6.1), round-
+    // half-up bias then arithmetic shift; only the low 32 bits of the
+    // shifted value are kept (32'() cast), matching online_softmax's own
+    // l_resc truncation style (8.2) and trusted by the same 3.7 bound.
+    always_comb begin
+      acc_base   = pv_row_start ? 32'sd0 : acc_num[pv_lane][gK];
+      ar_full    = 49'(signed'(acc_base) * signed'({1'b0, pv_r}));
+      ar_rnd     = ar_full + 49'sd16384;
+      wv_prod    = 24'(signed'({1'b0, pv_w}) * signed'(v_row_reg[8*gK+:8]));
+      pv_next[gK] = 32'(ar_rnd >>> 15) + 32'(wv_prod);
+    end
+  end
+
+  // State: the selected lane's bank takes pv_next; every other bank holds.
+  for (genvar gL2 = 0; gL2 < 4; gL2++) begin : g_num_lane
+    for (genvar gK2 = 0; gK2 < 16; gK2++) begin : g_num_k
       always_ff @(posedge clk) begin
-        if (rst) acc_num[gL2][gK] <= '0;
-        else acc_num[gL2][gK] <= acc_next;
+        if (rst) acc_num[gL2][gK2] <= '0;
+        else if (pv_valid && (pv_lane == gL2[1:0])) acc_num[gL2][gK2] <= pv_next[gK2];
       end
     end
   end
@@ -634,6 +676,30 @@ module attention_top (
   // X") do not need this: they are true for any starting state by
   // construction, so they are proven unconditionally, not just from reset.
   initial assume (rst);
+
+  // Formal-only input constraint (2026-09-18, review finding F013): the
+  // shortest legal run is n_len = 4 (nblk = 1, 173 cycles), so a BMC depth
+  // that cannot reach that point proves nothing about done or completion.
+  // Pinning n_len to 4 on the accepted start makes done reachable at
+  // depth >= 175 (formal/attention_top.sby task `prove`), and the `cover`
+  // task proves the property is not vacuous. Only the value sampled on the
+  // accepted-start cycle matters (nblk_reg is latched there).
+  always_comb begin
+    if (state == S_IDLE && start) assume (n_len == 7'd4);
+  end
+
+  // The shared PV datapath (above) relies on the round-robin drain making
+  // lane_out_valid one-hot-or-zero on every cycle.
+  always_comb begin
+    if (f_past_valid)
+      assert ($onehot0({lane_out_valid[3], lane_out_valid[2],
+                        lane_out_valid[1], lane_out_valid[0]}));
+  end
+
+  // Reachability witness for the done-based properties (sby `cover` task).
+  always_ff @(posedge clk) begin
+    if (f_past_valid) cover (done);
+  end
 
   always_comb begin
     // busy/done mutual exclusion. Guarded by f_past_valid like every other

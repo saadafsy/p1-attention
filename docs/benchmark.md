@@ -32,14 +32,27 @@ pre-Phase-4 smoke run of the same log; superseded.
 (CPU compute-only = median minus the 1.154 ms process floor; at N = 4 and 8
 the subtraction is inside measurement noise and no speedup is claimed.)
 
-Utilization view (clock-free, the more meaningful number): one N = 64
-inference performs 2 * N^2 * D = 131,072 MAC operations on the Q.K^T side
-plus the same again on the PV side, about 262k MACs plus 4,096 exp lookups
-and 1,024 divisions, in 6,593 cycles: roughly 40 sustained MAC/cycle against
-32 instantiated multipliers (16 tile + 16 PV), i.e. the datapath stays over
-100% busy on multiplies when both sides overlap (drain of block b overlaps
-compute of block b+1), with the gap to the ideal 32/cycle floor coming from
-the group tails (S_DRAIN_LAST + S_DIVIDE, 156 cycles per group).
+Utilization view (clock-free, the more meaningful number). Corrected
+2026-09-18: the earlier revision counted 2 * N^2 * D = 131,072 "MACs" per
+side, which is the multiply-and-add OPERATION count, and then called the
+262k total MACs; the resulting "over 100% busy" conclusion was impossible
+on its face and was the tell. One N = 64 inference performs N^2 * D =
+65,536 MACs on the Q.K^T side and 65,536 on the PV side, 131,072 MACs in
+total, plus 8,192 exp lookups (w and r per element) and 1,024 divisions, in
+6,593 cycles: 19.9 sustained MAC/cycle. The engine instantiates 48
+multipliers (16 in the tile, 16 acc*r rescale and 16 w*v in the shared PV
+datapath, docs/uarch.md 8.3); against the 32 that perform golden-model MACs
+(tile + w*v) that is 62% utilization, and against all 48 it is 41%. The gap
+to the ideal comes from the group tails (S_DRAIN_LAST + S_DIVIDE, 156
+cycles per group, 38% of the 412-cycle group at N = 64) and from the PV
+side idling during block 0 of every group (nothing to drain yet).
+
+Scope of the cycle counts: cycle_count covers the run only, from the
+accepted start pulse to done. Loading Q, K and V through the byte-serial
+load port costs 3 * N * D cycles on top (3,072 cycles at N = 64, i.e. 47%
+of the 6,593-cycle run) and reading the output back another N * D; the
+speedup column therefore ignores I/O entirely, which is the usual
+accelerator-benchmark convention but must be said.
 
 Honest caveats, in order of importance:
 1. The CPU baseline is the reference model, compiled -O2 but written for

@@ -7,12 +7,24 @@
 # per-net activity simulation; say so wherever the numbers are quoted.
 # Env vars: LIB, NETLIST, MODULE, PERIOD_NS (use the config's MET period),
 # ACTIVITY (measured avg toggles/net/cycle).
-read_liberty $::env(LIB)
-read_verilog $::env(NETLIST)
-link_design $::env(MODULE)
-
-create_clock -name clk -period $::env(PERIOD_NS) [get_ports clk]
-
-set_power_activity -global -activity $::env(ACTIVITY) -duty 0.5
-report_power
-exit
+#
+# Exit status (2026-09-18, review finding L11): all steps in catch, any
+# failure exits 1 (a bare `exit` returned 0 even after a failed command).
+proc die {msg} {
+    puts stderr "ERROR: $msg"
+    exit 1
+}
+foreach v {LIB NETLIST MODULE PERIOD_NS ACTIVITY} {
+    if {![info exists ::env($v)] || $::env($v) eq ""} { die "env var $v is not set" }
+}
+if {[catch {
+    read_liberty $::env(LIB)
+    read_verilog $::env(NETLIST)
+    link_design $::env(MODULE)
+    create_clock -name clk -period $::env(PERIOD_NS) [get_ports clk]
+    set_power_activity -global -activity $::env(ACTIVITY) -duty 0.5
+    report_power
+} msg]} {
+    die $msg
+}
+exit 0

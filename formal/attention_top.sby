@@ -4,10 +4,28 @@
 # do not fight the tool") and per uarch.md 8.3's own statement of the
 # property list: reset state (S_IDLE, busy=0, done=0, cycle_count=0),
 # busy/done mutual exclusion, done implies idle, cycle_count monotone
-# non-decreasing while busy. None of these reference q_mem/k_mem/v_mem/
-# out_mem, the NUM accumulators, the score/rescale arithmetic, or the
-# divider bank; the control FSM's transition conditions depend only on
-# counters (t, kb, rg, row, div_cnt) and start, never on datapath values.
+# non-decreasing while busy, and (2026-09-18) lane_out_valid one-hot-or-zero
+# (the invariant the shared PV datapath relies on). None of these reference
+# q_mem/k_mem/v_mem/out_mem, the NUM accumulators, the score/rescale
+# arithmetic, or the divider bank; the control FSM's transition conditions
+# depend only on counters (t, kb, rg, row, div_cnt) and start, never on
+# datapath values.
+#
+# DEPTH (2026-09-18, review finding F013): the previous single task ran at
+# depth 10 from `initial assume (rst)`. The shortest legal run (n_len = 4)
+# is 173 cycles, so `done` could never be 1 inside any depth-10 trace: the
+# "done implies idle" property and the done half of busy/done exclusion were
+# VACUOUS, and EVIDENCE audit-attention_top-formal-coverage's "non-vacuous"
+# wording was wrong for them (see EVIDENCE.md errata). Two tasks now:
+#   prove : mode bmc, depth 180, with the RTL FORMAL block assuming n_len = 4
+#           on the accepted start so completion is reachable inside the bound.
+#   cover : mode cover, depth 180, `cover (done)` in the RTL: sby must reach
+#           done or the task fails, which is the machine check that `prove`
+#           exercises the completion properties. Both tasks are required.
+# Runtime at depth 180 has NOT been measured (no toolchain on the machine
+# that made this change); yices completed depth 10 in 2.8 s after the BRAM
+# conversion. If depth 180 is intractable, keep this file's tasks and record
+# the achieved depth honestly rather than silently lowering it.
 #
 # Inner-module assertions are stripped below (chformal -assert -remove on
 # mac_unit, matmul_tile, online_softmax) because each of those contracts is
@@ -15,41 +33,28 @@
 # formal/matmul_tile.sby, formal/online_softmax.sby, all PASS, EVIDENCE.md
 # rows). Re-proving them again inside this integration-level BMC would be
 # redundant solver load for zero additional coverage: the three submodules
-# are instantiated here UNMODIFIED (uarch.md 8.3's own words), so their own
-# sby runs already cover their internal invariants over every elaboration.
+# are instantiated here UNMODIFIED (uarch.md 8.3's own words).
 #
 # What is NOT proven here, and why that is fine: the running-max-monotonic
 # and DEN-no-overflow invariants for the (m, l) recurrence are proven
-# standalone in formal/online_softmax.sby (same module, same equations,
-# instantiated verbatim 4 times here); the NUM accumulator's own
+# standalone in formal/online_softmax.sby; the NUM accumulator's own
 # no-overflow bound (uarch.md 3.7) and the divider bank's arithmetic
 # (uarch.md 3.8) are exercised end-to-end, bit-exactly, by cocotb
 # (tb/attention_top/test_attention_top.py) against model/attn.py
-# attn_fixed, not re-attempted in formal: an open bmc flow proving a
-# 34-bit restoring divider or a 48-bit rescale multiply functionally
-# correct, on top of three already-elaborated RAMs and a ROM, is exactly
-# the kind of proof this toolchain cannot do in reasonable time
-# (CLAUDE.md formal-limit note). Keeping the strip in place is what makes
-# this sby tractable at all: the full unstripped netlist (3 RAMs, a ROM,
-# 16+16 multipliers, a 16-wide divider bank, plus the three submodules'
-# own BMC-heavy assertions) is far past what open smtbmc/z3 proves in a
-# reasonable budget.
+# attn_fixed, not re-attempted in formal.
 #
-# Depth: the transition relation still elaborates the full datapath (3
-# RAMs, the ROM, the multipliers, the 16-wide divider bank) even with
-# control-only assertions, so BMC is heavy despite the light property set.
-# Settled at depth 10 (see report for wall time).
-#
-# Solver (lead-authorized cross-file change, formal-leg iteration 2): z3
-# hangs >10 min stuck on "Checking assumptions in step 1" on this
-# memory-heavy model (3 RAMs + ROM + 16-wide divider bank still in the
-# transition relation, per the note above), independent of the BMC depth
-# target (retested at depth 5, same wall). yices 2.7.0 completes the full
-# depth-10 BMC in about 1 minute on the identical design (trials
-# 2026-07-16, formal/attention_top_*_trial workdirs, since removed).
+# Solver: z3 hangs >10 min on this memory-heavy model (3 RAMs + ROM +
+# 16-wide divider bank still in the transition relation), independent of
+# the BMC depth target; yices completes (trials 2026-07-16).
+[tasks]
+prove
+cover
+
 [options]
-mode bmc
-depth 10
+prove: mode bmc
+prove: depth 180
+cover: mode cover
+cover: depth 180
 
 [engines]
 smtbmc yices
