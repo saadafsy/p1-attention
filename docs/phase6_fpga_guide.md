@@ -16,17 +16,20 @@ Audience: you have used Quartus but never Vivado. Differences are called out
 explicitly. Time budget: one weekend for tool install + first bitstream, one
 weekend for real bring-up.
 
-## 0. Bring-up log (Nexys A7-100T), to be filled by the run
+## 0. Bring-up log (Basys 3 by default, or Nexys A7-100T), to be filled by the run
 
-Added 2026-09-19 (target-scores change 2). The board decision moved from
-the Basys 3 to the Nexys A7-100T (same Artix-7 family and Vivado flow, more
-fabric, DDR2 for later work); sections 1 to 10 below remain the click-by-
-click Basys 3 walkthrough and stay valid for the Nexys A7 except for the
-pins, which live in fpga/nexys_a7_100t.xdc. The Nexys A7 flow is scripted:
+Added 2026-09-19 (target-scores change 2). Board choice: the design fits
+the Basys 3 (XC7A35T: 90 DSP48 for the 48 multipliers, 50 BRAM36 for the
+four memories and four exp ROMs) with room to spare, the walkthrough
+below was written for it, and it costs about half of a Nexys A7-100T. The
+Nexys A7 buys only DDR2/Ethernet for a future memory-hierarchy phase. The
+scripted flow supports both: `BOARD=basys3` (default, fpga/basys3.xdc) or
+`BOARD=nexys_a7` (fpga/nexys_a7_100t.xdc); the RTL, the MMCM top and the
+host script are identical. Everything below is scripted:
 
 | Step | Command (repo root) | Gate | Result (fill in) |
 |------|---------------------|------|------------------|
-| 1 heartbeat | `make -C fpga bitstream F_MHZ=100` then `make -C fpga program` | LED0 blinks ~1 Hz, LED1 (MMCM locked) on | |
+| 1 heartbeat | `make -C fpga bitstream F_MHZ=100 BOARD=basys3` then `make -C fpga program` | LED0 blinks ~1 Hz, LED1 (MMCM locked) on | |
 | 2 UART loopback | `python3 -c "..."` PING over `fpga/host/attn_host.py` (`link.ping()` == 0xA5) | 0xA5 returned | |
 | 3 protocol | `make -C fpga hw-test PORT=/dev/ttyUSB1` | every LOAD/RUN/READ_OUT byte matches model/attn.py at n=16 and n=64 | |
 | 4 clock sweep | `make -C fpga sweep FREQS=50,75,100,110,125,140` | build/fpga/sweep.csv; last PASS row = measured max | |
@@ -34,8 +37,8 @@ pins, which live in fpga/nexys_a7_100t.xdc. The Nexys A7 flow is scripted:
 
 Fields the EVIDENCE row must carry (nothing else is claimable):
 
-- Board and part: Nexys A7-100T, xc7a100tcsg324-1; Vivado version: ____
-- Constraints: fpga/nexys_a7_100t.xdc; top: fpga/nexys_a7_top.sv (MMCM
+- Board and part: Basys 3 xc7a35tcpg236-1 or Nexys A7-100T xc7a100tcsg324-1: ____; Vivado version: ____
+- Constraints: fpga/basys3.xdc or fpga/nexys_a7_100t.xdc; top: fpga/nexys_a7_top.sv (MMCM
   parameters per build, VCO 1000 MHz, design clock = 1000 / CLKOUT0_DIVIDE)
 - Utilization at 100 MHz (util_impl.rpt): LUT ____ FF ____ BRAM ____ DSP ____;
   exp ROMs implemented as ____ block-RAM primitives (build.tcl gate: >= 4)
@@ -48,8 +51,8 @@ Fields the EVIDENCE row must carry (nothing else is claimable):
 - Photo or short video of the board running the host test: docs/bench/____
 
 Until every field is filled, everything in fpga/ is verified in simulation
-only (EVIDENCE rows fpga-kit-sim and audit-fpga-kit-*), the Nexys A7 files
-(XDC, MMCM top, build/program/sweep scripts, XPM exp ROM) have never been
+only (EVIDENCE rows fpga-kit-sim and audit-fpga-kit-*), the board files
+(both XDCs, MMCM top, build/program/sweep scripts, XPM exp ROM) have never been
 run through Vivado, and every hardware claim stays PENDING-HARDWARE.
 
 Prerequisite already in the tree (change list item "fix the exp LUT"): with

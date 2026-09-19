@@ -51,7 +51,7 @@ agents build rtl/ and formal/ in builder mode; my ownership is the Mode-B replic
 - [Building] exp LUT as block ROM                 (domain: sandbox)  rtl/exp_lut_2p.sv + fpga/exp_lut_2p_xilinx.sv + attention_top PIPE_ROM plumbing; needs make verify (both PIPE_ROM) + Vivado BRAM check
 - [Building] UVM environment (matmul_tile)        (domain: sandbox)  tb/uvm written; needs Vivado xsim: smoke, regress, bug-proof
 - [Building] VHDL port of mac_unit                (domain: sandbox)  rtl_vhdl/mac_unit.vhd + tb/vhdl_mac; needs make vhdl-crosscheck (ghdl + verilator)
-- [Blocked: needs bench] FPGA bring-up (Nexys A7-100T)  (domain: hardware)  fpga/nexys_a7_* + scripts written; make -C fpga hw-gate on the board; PENDING-HARDWARE
+- [Blocked: needs bench] FPGA bring-up (Basys 3 default, Nexys A7 optional)  (domain: hardware)  fpga/basys3.xdc, fpga/nexys_a7_* + scripts written; make -C fpga hw-gate BOARD=basys3 on the board; PENDING-HARDWARE
 
 ## Phase 7: Physical design + silicon
 - [Todo] openlane RTL-to-GDS on the tile + KLayout screenshot  (domain: sandbox)  guide: docs/phase7_physical_guide.md

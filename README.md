@@ -49,7 +49,7 @@ walkthrough is [docs/guide.md](docs/guide.md).
 | Phase 5: switching-activity power proxy, tradeoffs writeup | PASS | [phase5-docs] |
 | Top-level STA of attention_top (`make sta-top`) | tooling written, never run | none yet |
 | FPGA bring-up kit (UART protocol wrapper, host script): verified in cocotb simulation | sim PASS; protocol NAK hardening awaits re-run | [fpga-kit-sim], audit rows |
-| FPGA on a Nexys A7-100T (XDC, MMCM top, Vivado build/program/sweep scripts, XPM block-ROM exp tables) | written, never synthesized or run | PENDING-HARDWARE |
+| FPGA on a Basys 3 (default) or Nexys A7-100T (XDCs, MMCM top, Vivado build/program/sweep scripts, XPM block-ROM exp tables) | written, never synthesized or run | PENDING-HARDWARE |
 | UVM environment for matmul_tile (tb/uvm, Vivado xsim) | written, never compiled or run | none yet, see tb/uvm/README.md |
 | VHDL port of mac_unit (rtl_vhdl/) with a same-vectors cross-check | written, never simulated | none yet |
 | Perl ports of two scripts, byte-identical to the Python originals | PASS (`make perl-crosscheck`) | run on 2026-09-19 |
@@ -105,7 +105,8 @@ tb/        cocotb testbenches per module, tb/gls (gate-level), tb/uvm (the
            UVM environment for matmul_tile), tb/vhdl_mac (VHDL/SV replay).
 formal/    SymbiYosys .sby setups, one per module.
 fpga/      Vendor-neutral bring-up kit (UART protocol wrapper, host script)
-           plus the Nexys A7 top, XDC, XPM exp ROM and Vivado scripts.
+           plus the Artix-7 board top, Basys 3 / Nexys A7 XDCs, XPM exp
+           ROM and Vivado scripts (BOARD=basys3 default).
 scripts/   Gates and tools: check_coverage.py, audit_claims.py,
            evidence_snapshot.py, sta.tcl / sta_summary.py, power proxy,
            GLS vector generators (Python and Perl), vector exporters.

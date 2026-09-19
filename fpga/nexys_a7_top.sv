@@ -1,6 +1,10 @@
 `timescale 1ns / 1ps
-// nexys_a7_top: board top for the Nexys A7-100T (added 2026-09-19,
-// target-scores change 2). Wraps attn_uart_top with the one Xilinx
+// nexys_a7_top: Artix-7 board top (added 2026-09-19, target-scores change
+// 2). Despite the name it is board-agnostic: 100 MHz in, a button, the
+// USB-UART pair and two LEDs, which both the Basys 3 (XC7A35T, default,
+// fpga/basys3.xdc) and the Nexys A7-100T (fpga/nexys_a7_100t.xdc) provide;
+// fpga/scripts/build.tcl picks the part and XDC from its board argument.
+// It wraps attn_uart_top with the one Xilinx
 // primitive the clock sweep needs, an MMCME2_BASE that turns the 100 MHz
 // oscillator into the design clock at a frequency set by PARAMETERS, so
 // fpga/scripts/sweep.tcl can rebuild the bitstream at each target frequency

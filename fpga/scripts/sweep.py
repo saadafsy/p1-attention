@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Clock sweep on the Nexys A7 (target-scores change 2, step 5): for each
+"""Clock sweep on the board (Basys 3 default, or Nexys A7; change 2, step 5): for each
 target frequency, rebuild the bitstream with MMCM parameters that produce
 it, program the board, run the self-checking host test
 (fpga/host/attn_host.py, output compared against model/attn.py), and record
@@ -53,6 +53,7 @@ def main():
     ap.add_argument("--n", type=int, default=16)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--out", default=str(ROOT / "build" / "fpga"))
+    ap.add_argument("--board", default="basys3", choices=["basys3", "nexys_a7"])
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -68,7 +69,7 @@ def main():
                "vivado_wns_ns": "", "bitstream_built": 0, "programmed": 0,
                "hw_test": "not run", "n_len": a.n, "seed": a.seed}
         rc = run(["vivado", "-mode", "batch", "-source", "fpga/scripts/build.tcl", "-tclargs",
-                  str(d), str(MULT), str(DIVCLK), str(od), str(clk_hz)], d / "build.log")
+                  str(d), str(MULT), str(DIVCLK), str(od), str(clk_hz), a.board], d / "build.log")
         summ = d / "summary.txt"
         if summ.exists():
             for line in summ.read_text().splitlines():

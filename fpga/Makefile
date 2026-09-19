@@ -1,5 +1,7 @@
-# FPGA bring-up targets for the Nexys A7-100T (target-scores change 2,
-# added 2026-09-19). Run from the repo root: make -C fpga <target>. Needs
+# FPGA bring-up targets (target-scores change 2, added 2026-09-19).
+# BOARD=basys3 (default, XC7A35T, fpga/basys3.xdc) or BOARD=nexys_a7
+# (XC7A100T, fpga/nexys_a7_100t.xdc); the RTL is identical, only the part
+# and the pins differ. Run from the repo root: make -C fpga <target>. Needs
 # Vivado on PATH (source <Vivado>/settings64.sh) and, from `program` on,
 # the board on USB. Every target is a gate step of docs/phase6_fpga_guide.md
 # section 0; nothing here has been run yet (PENDING-HARDWARE).
@@ -14,6 +16,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -c
 ROOT := $(abspath ..)
+BOARD ?= basys3
 F_MHZ ?= 100
 PORT ?= /dev/ttyUSB1
 FREQS ?= 50,75,100,110,125
@@ -26,7 +29,7 @@ CLK_HZ := $(shell python3 -c "print(int($(F_MHZ)*1000000))")
 .PHONY: bitstream program hw-test sweep hw-gate clean
 
 bitstream:
-	cd $(ROOT) && vivado -mode batch -source fpga/scripts/build.tcl -tclargs $(OUT) 10 1 $(OUT_DIV) $(CLK_HZ)
+	cd $(ROOT) && vivado -mode batch -source fpga/scripts/build.tcl -tclargs $(OUT) 10 1 $(OUT_DIV) $(CLK_HZ) $(BOARD)
 
 program:
 	cd $(ROOT) && vivado -mode batch -source fpga/scripts/program.tcl -tclargs $(OUT)/nexys_a7_top.bit
@@ -36,7 +39,7 @@ hw-test:
 	cd $(ROOT) && python3 fpga/host/attn_host.py --port $(PORT) --n 64 --seed 7
 
 sweep:
-	cd $(ROOT) && python3 fpga/scripts/sweep.py --port $(PORT) --freqs $(FREQS) --n $(N)
+	cd $(ROOT) && python3 fpga/scripts/sweep.py --port $(PORT) --freqs $(FREQS) --n $(N) --board $(BOARD)
 
 hw-gate: bitstream program hw-test sweep
 	@echo "FPGA HW GATE: bitstream built, board programmed, golden compare passed on hardware, sweep table at $(ROOT)/build/fpga/sweep.csv"
