@@ -68,10 +68,16 @@ class tile_random_sequence extends uvm_sequence #(tile_seq_item);
 
   // One item with the given control, operands randomized under the item's
   // own constraints (so every operand still follows the Q1.6 edge weighting).
-  task drive(bit rst, bit en, bit clr);
+  // Argument names differ from the item's fields so the inline constraint needs
+  // no local:: (Verilator's randomize rejects it; plain names work everywhere).
+  task drive(bit r_rst, bit r_en, bit r_clr);
     tile_seq_item it = tile_seq_item::type_id::create("rnd");
+    // c_ctrl (dist weights) is switched off because the inline equalities below fix
+    // all three controls; Verilator 5.053 reports dist + == on one variable as
+    // unsatisfiable. Operand constraints (c_q, c_k) stay on.
+    it.c_ctrl.constraint_mode(0);
     start_item(it);
-    if (!it.randomize() with { rst == local::rst; en == local::en; clr == local::clr; })
+    if (!it.randomize() with { rst == r_rst; en == r_en; clr == r_clr; })
       `uvm_fatal("RND", "randomize failed")
     finish_item(it);
   endtask

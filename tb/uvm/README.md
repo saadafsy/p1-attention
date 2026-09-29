@@ -5,7 +5,12 @@ environment for ONE module, beside the cocotb suite that remains the
 regression for every module and the primary golden-model check (README:
 cocotb for the full design, UVM for matmul_tile).
 
-STATUS: written, never compiled or run. There is no UVM-capable simulator
+STATUS (2026-09-28): compiled and run on Verilator 5.053 with upstream Accellera UVM
+1800.2-2017-1.0 (`make -C tb/uvm gate SIM=verilator`; see EVIDENCE.md row
+uvm-verilator-20260928). Merged coverage was NOT run and Vivado xsim has still not been
+used. Original status follows.
+
+STATUS (original): written, never compiled or run. There is no UVM-capable simulator
 where this was written. Nothing about it may appear on a resume until the
 gate below has been observed passing on a named simulator, and the
 simulator name goes into the EVIDENCE.md row.
