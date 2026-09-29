@@ -1,0 +1,3 @@
+# Whole-file line-coverage exclusions for attention_top (scripts/check_coverage.py).
+# Replaces the coverage_off directive in coverage.vlt, which stopped working on Verilator 5.053.
+exp_lut.svh generated exp_lut ROM: its 1024 arms are swept entry for entry in tb/online_softmax (rom_full_sweep, 1029/1030 lines) and pinned by sha256 at TB import; see coverage.vlt

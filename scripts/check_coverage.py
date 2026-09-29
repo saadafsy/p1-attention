@@ -21,6 +21,16 @@ nothing (stale) or matches a HIT point is an error, so waivers cannot rot.
 Raw, waived, and effective figures are all printed. This mirrors the
 functional model's declared UNREACHABLE bins (test_softmax_coverage.py).
 
+Whole-file exclusions (2026-09-28): the coverage_off directive in the .vlt
+files stopped removing the exp_lut.svh case-arm points on Verilator 5.053
+(it worked on 5.051), so the gate does the exclusion itself. A file is
+excluded from the LINE count only if it is listed, with a reason, in
+tb/M/coverage_exclude.txt (or coverage_exclude_pipe_rom1.txt for the
+PIPE_ROM=1 artifact), one per line: `<source basename> <reason>`. The
+excluded point count is printed, and an entry that matches no instrumented
+point is an error (so an exclusion cannot rot). The default online_softmax
+run has no exclusion: it sweeps the whole ROM.
+
 Functional coverage: if tb/M/func_coverage.txt exists (written by the TB's
 self-asserting coverage model), its TOTAL line is parsed and gated against
 --func. If it does not exist, the gate says so EXPLICITLY.
@@ -86,6 +96,29 @@ for t, src, line, hits in parse_records(dat):
         branch_total += 1
         branch_hit += hits > 0
 
+# ---- whole-file exclusions ---------------------------------------------------
+excl = {}
+excl_errors = []
+efile = tbdir / ('coverage_exclude_pipe_rom1.txt' if a.dat == 'coverage_pipe_rom1.dat'
+                 else 'coverage_exclude.txt')
+if efile.is_file():
+    for raw in efile.read_text().splitlines():
+        s_ = raw.strip()
+        if not s_ or s_.startswith('#'):
+            continue
+        m = re.match(r'^(\S+)\s+(.+)$', s_)
+        if not m:
+            excl_errors.append(f'unparseable exclusion line: {raw!r}')
+            continue
+        excl[m.group(1)] = m.group(2)
+excluded_n = {}
+for name in excl:
+    n = sum(1 for src, _, _ in line_pts if src == name)
+    if n == 0:
+        excl_errors.append(f'stale exclusion {name} matches no instrumented line')
+    excluded_n[name] = n
+line_pts = [pt for pt in line_pts if pt[0] not in excl]
+
 if not line_pts:
     print(f'coverage[{a.module}]: {dat} had no t=line points; set COVERAGE_STUB=1 if pre-Phase-3.')
     sys.exit(1)
@@ -109,6 +142,8 @@ unhit = {(s, l) for s, l, h in line_pts if h == 0}
 present = {(s, l) for s, l, h in line_pts}
 waived = set()
 for key, reason in waivers.items():
+    if key[0] in excl:
+        continue  # whole file excluded for this artifact; its waiver applies to the other run
     if key not in present:
         waiver_errors.append(f'stale waiver {key[0]}:{key[1]} matches no instrumented line')
     elif key not in unhit:
@@ -122,11 +157,15 @@ eff_total = raw_total - len(waived)
 eff_hit = raw_hit
 raw_pct = 100.0 * raw_hit / raw_total
 eff_pct = 100.0 * eff_hit / eff_total if eff_total else 100.0
-line_ok = eff_pct >= a.line and not waiver_errors
+line_ok = eff_pct >= a.line and not waiver_errors and not excl_errors
 
 print(f'coverage[{a.module}] ({a.dat}): line raw {raw_hit}/{raw_total} = {raw_pct:.1f}%; '
       f'waived {len(waived)} documented-unreachable; effective {eff_hit}/{eff_total} = '
       f'{eff_pct:.1f}% (threshold {a.line}%) {"PASS" if line_ok else "FAIL"}')
+for name, reason in sorted(excl.items()):
+    print(f'    EXCLUDED  {name} ({excluded_n[name]} line points not counted)  {reason}')
+for e in excl_errors:
+    print(f'    EXCLUSION ERROR  {e}')
 if branch_total:
     print(f'coverage[{a.module}]: branch {branch_hit}/{branch_total} = '
           f'{100.0 * branch_hit / branch_total:.1f}% (reported, not gated)')

@@ -26,3 +26,7 @@ tb/uvm/*.log
 tb/uvm/*.jou
 tb/uvm/*.pb
 tb/uvm/*.wdb
+tb/*/sim_build_rebuild*/
+# gate-generated per-seed UVM vector files (only seed 17 is tracked)
+tb/uvm/vectors/*
+!tb/uvm/vectors/tile_seed_17.txt

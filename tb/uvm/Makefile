@@ -23,7 +23,15 @@ NUM_DOTS ?= 100
 ROOT := $(abspath ../..)
 OUT := $(ROOT)/build/uvm
 VEC := vectors/tile_seed_$(SEED).txt
+SIM ?= xsim
+ifeq ($(SIM),verilator)
+# Verilator + upstream UVM 2017 (bootcamp M5 route): no merged coverage.
+RUN := bash scripts/run_verilator.sh
+LOG := sim.log
+else
 RUN := bash scripts/run_xsim.sh
+LOG := xsim.log
+endif
 
 .PHONY: vectors smoke replay random regress bug-proof gate clean check
 
@@ -49,7 +57,11 @@ regress:
 	  $(MAKE) --no-print-directory replay SEED=$$s; \
 	  $(MAKE) --no-print-directory random SEED=$$s; \
 	done
+ifeq ($(SIM),verilator)
+	@echo "merged coverage NOT run (SIM=verilator has no coverage merge)"
+else
 	bash scripts/merge_coverage.sh $(OUT)
+endif
 
 # Negative test: with the deliberate mac_unit mutation compiled in
 # (rtl/mac_unit.sv `ifdef INJECT_BUG: the load row ignores clr, so a new
@@ -57,14 +69,16 @@ regress:
 # MUST report mismatches and xsim MUST exit nonzero. If it exits zero the
 # environment is not checking, and this target fails.
 bug-proof: $(VEC)
-	@if $(RUN) tile_replay_test $(SEED) $(OUT)/bug_proof +VECTOR_FILE=$(abspath $(VEC)) --define INJECT_BUG; then \
-	  echo "BUG-PROOF FAIL: the injected bug was NOT caught"; exit 1; \
-	else \
-	  grep -q "acc(.*): dut=.* golden=" $(OUT)/bug_proof/xsim.log && echo "BUG-PROOF PASS: injected bug caught by the scoreboard"; \
-	fi
+ifeq ($(SIM),verilator)
+	@# leg 1: full environment (scoreboard + SVA); leg 2: scoreboard alone. Both MUST fail.
+	@if $(RUN) tile_replay_test $(SEED) $(OUT)/bug_proof +VECTOR_FILE=$(abspath $(VEC)) --define INJECT_BUG; then 	  echo "BUG-PROOF FAIL: the injected bug was NOT caught (scoreboard + SVA)"; exit 1; 	else echo "BUG-PROOF leg 1: caught with SVA enabled"; fi
+	@if $(RUN) tile_replay_test $(SEED) $(OUT)/bug_proof_sb_only +VECTOR_FILE=$(abspath $(VEC)) --define INJECT_BUG --no-sva; then 	  echo "BUG-PROOF FAIL: the scoreboard alone did NOT catch the injected bug"; exit 1; 	else grep -q "acc(.*): dut=.* golden=" $(OUT)/bug_proof_sb_only/$(LOG) 	  && echo "BUG-PROOF PASS: injected bug caught by the scoreboard alone and by the SVA"; fi
+else
+	@if $(RUN) tile_replay_test $(SEED) $(OUT)/bug_proof +VECTOR_FILE=$(abspath $(VEC)) --define INJECT_BUG; then 	  echo "BUG-PROOF FAIL: the injected bug was NOT caught"; exit 1; 	else 	  grep -q "acc(.*): dut=.* golden=" $(OUT)/bug_proof/$(LOG) && echo "BUG-PROOF PASS: injected bug caught by the scoreboard"; 	fi
+endif
 
 gate: regress bug-proof
-	@echo "UVM GATE PASS: regress ($(UVM_SEEDS) seeds x 2 tests) + merged coverage + injected bug caught"
+	@echo "UVM GATE PASS ($(SIM)): regress ($(UVM_SEEDS) seeds x 2 tests) + injected bug caught$(if $(filter verilator,$(SIM)), (merged coverage NOT run),  + merged coverage)"
 
 clean:
 	rm -rf $(OUT) xsim.dir *.log *.jou *.pb *.wdb

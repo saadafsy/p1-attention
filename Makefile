@@ -84,6 +84,8 @@ check-lib:
 synth-netlist: check-lib
 	@mkdir -p build
 	yosys -p 'read_verilog -sv $(SRC); hierarchy -top $(MODULE); synth -top $(MODULE); dfflibmap -liberty $(LIB); abc -liberty $(LIB); opt_clean; stat -liberty $(LIB); write_verilog -noattr build/$(MODULE)_netlist.v' 2>&1 | tee build/synth_netlist_$(MODULE).log
+	@# OpenSTA's Verilog reader rejects 'signed' on ports/wires (Yosys 0.69 emits it); a gate netlist does not need it.
+	@sed -i -E 's/^(  (input|output|inout|wire)) signed /\1 /' build/$(MODULE)_netlist.v
 
 # The PIPE_ROM=1 online_softmax netlist that tb/gls needs. This used to be a
 # hand-typed yosys command in docs/guide.md section 12 only, so README's
@@ -91,6 +93,8 @@ synth-netlist: check-lib
 synth-netlist-pipe1: check-lib
 	@mkdir -p build
 	yosys -p 'read_verilog -sv -defer $(SRC); chparam -set PIPE_ROM 1 online_softmax; hierarchy -top online_softmax; synth -top online_softmax; dfflibmap -liberty $(LIB); abc -liberty $(LIB); opt_clean; stat -liberty $(LIB); write_verilog -noattr build/online_softmax_pipe1_netlist.v' 2>&1 | tee build/synth_netlist_online_softmax_pipe1.log
+	@# OpenSTA's Verilog reader rejects 'signed' on ports/wires (Yosys 0.69 emits it); a gate netlist does not need it.
+	@sed -i -E 's/^(  (input|output|inout|wire)) signed /\1 /' build/online_softmax_pipe1_netlist.v
 
 sta: check-lib
 	@mkdir -p build

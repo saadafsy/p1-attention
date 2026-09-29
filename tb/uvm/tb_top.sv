@@ -28,14 +28,22 @@ module tb_top;
       .acc_flat(tif.acc_flat)
   );
 
+  // UVM_NO_DPI builds (Verilator) cannot read +UVM_TESTNAME inside run_test(), so
+  // read it here; xsim and any DPI build behave identically.
+  string tn;
   initial begin
     uvm_config_db#(virtual tile_if)::set(null, "*", "vif", tif);
-    run_test();
+    if ($value$plusargs("UVM_TESTNAME=%s", tn)) run_test(tn);
+    else run_test();
   end
 
   final begin
-    uvm_report_server srv = uvm_report_server::get_server();
-    int errs = srv.get_severity_count(UVM_ERROR) + srv.get_severity_count(UVM_FATAL);
+    uvm_report_server srv;
+    int errs;
+    // declaration and assignment are separate on purpose: an initializer here can be
+    // evaluated once at time 0 (static-variable rule) and then never sees the errors.
+    srv = uvm_report_server::get_server();
+    errs = srv.get_severity_count(UVM_ERROR) + srv.get_severity_count(UVM_FATAL);
     if (errs != 0) $fatal(1, "tb_top: %0d UVM errors/fatals", errs);
     else $display("tb_top: UVM run clean (0 errors)");
   end

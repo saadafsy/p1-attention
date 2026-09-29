@@ -33,14 +33,14 @@ class tile_coverage extends uvm_subscriber #(tile_seq_item);
     // magnitude buckets of the Q1.6 code (0, tiny, half scale, full scale)
     cp_qmag: coverpoint qv {
       bins min_m128 = {-128};
-      bins small = {[-15:-1], [1:15]};
+      bins low_mag = {[-15:-1], [1:15]};
       bins mid = {[-127:-16], [16:126]};
       bins max_127 = {127};
       bins zero = {0};
     }
     cp_kmag: coverpoint kv {
       bins min_m128 = {-128};
-      bins small = {[-15:-1], [1:15]};
+      bins low_mag = {[-15:-1], [1:15]};
       bins mid = {[-127:-16], [16:126]};
       bins max_127 = {127};
       bins zero = {0};
@@ -75,7 +75,7 @@ class tile_coverage extends uvm_subscriber #(tile_seq_item);
     // SACC magnitude classes up to the D=16 extremum 16 * 2^14 = 2^18
     cp_acc: coverpoint accv {
       bins zero = {0};
-      bins small = {[-4095:-1], [1:4095]};
+      bins low_mag = {[-4095:-1], [1:4095]};
       bins mid = {[-131071:-4096], [4096:131071]};
       bins near_extremum = {[-262144:-131072], [131072:262144]};
       bins beyond_d16 = {[-8388608:-262145], [262145:8388607]}; // only reachable past D=16

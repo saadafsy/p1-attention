@@ -27,7 +27,7 @@ class tile_base_test extends uvm_test;
 
   function void end_of_elaboration_phase(uvm_phase phase);
     super.end_of_elaboration_phase(phase);
-    uvm_top.print_topology();
+    uvm_root::get().print_topology();
   endfunction
 endclass
 
