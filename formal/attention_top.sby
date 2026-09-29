@@ -22,10 +22,12 @@
 #   cover : mode cover, depth 180, `cover (done)` in the RTL: sby must reach
 #           done or the task fails, which is the machine check that `prove`
 #           exercises the completion properties. Both tasks are required.
-# Runtime at depth 180 has NOT been measured (no toolchain on the machine
-# that made this change); yices completed depth 10 in 2.8 s after the BRAM
-# conversion. If depth 180 is intractable, keep this file's tasks and record
-# the achieved depth honestly rather than silently lowering it.
+# Runtime (2026-09-29, personal laptop, Yosys 0.69 / SBY 0.69, OSS CAD Suite
+# 2026-09-18): `prove` at depth 180 PASSES with btormc
+# in about 29 minutes of process time; see EVIDENCE.md row
+# verify-attention_top-*. If depth 180 becomes intractable after a change,
+# keep this file's tasks and record the achieved depth honestly rather than
+# silently lowering it.
 #
 # Inner-module assertions are stripped below (chformal -assert -remove on
 # mac_unit, matmul_tile, online_softmax) because each of those contracts is
@@ -43,9 +45,15 @@
 # (tb/attention_top/test_attention_top.py) against model/attn.py
 # attn_fixed, not re-attempted in formal.
 #
-# Solver: z3 hangs >10 min on this memory-heavy model (3 RAMs + ROM +
-# 16-wide divider bank still in the transition relation), independent of
-# the BMC depth target; yices completes (trials 2026-07-16).
+# Solver: the SMT engines are the wrong tool for `prove` here. Measured on
+# the current model: smtbmc yices took about 18 min for the first step and
+# was still on step 18 after 49 to 55 min (stopped); smtbmc boolector and
+# bitwuzla were only at steps 46 and 62 after 52 min of the same race; z3 hung >10 min in
+# the 2026-07-16 trials. btormc (word-level BMC on the BTOR2 model) finished
+# all 180 steps in about 29 min, so `prove` uses it. `cover` keeps
+# smtbmc yices (reached done at step 175). k-induction (smtbmc -i) fails on
+# the cycle_count monotone assert without strengthening invariants, and
+# abc pdr errors on undefined bits.
 [tasks]
 prove
 cover
@@ -57,7 +65,8 @@ cover: mode cover
 cover: depth 180
 
 [engines]
-smtbmc yices
+prove: btor btormc
+cover: smtbmc yices
 
 [script]
 read_verilog -sv -formal -DFORMAL mac_unit.sv matmul_tile.sv exp_lut_2p.sv online_softmax.sv attention_top.sv
