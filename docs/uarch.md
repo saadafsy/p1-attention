@@ -741,7 +741,11 @@ row_start_d into 16 rescale-multiply-add columns (one per k), and only the
 selected lane's acc bank registers the result. The datapath holds 16
 acc*r multipliers (32s x 16u) and 16 w*v multipliers (16u x 8s): 32
 multiply operations per cycle in the PV path, plus the tile's 16, for 48
-multipliers in the whole engine. Implementation note (2026-09-18): the
+multipliers in the tile and PV path. The whole engine has more: the 16
+drain fold-in multipliers in attention_top.sv (g_cap_row/g_cap_col, the
+d=15 product added into the captured block) and the softmax l*r rescale
+multiplier(s) in online_softmax.sv are counted separately (erratum,
+2026-09-29). Implementation note (2026-09-18): the
 first RTL revision replicated the arithmetic per (lane, k), elaborating
 4x this count; the shared form above is what the RTL now implements
 (rtl/attention_top.sv g_pv), the arithmetic per column is unchanged.
