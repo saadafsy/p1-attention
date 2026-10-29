@@ -40,16 +40,6 @@ flowchart LR
 - Scale is small (D = 16, N <= 64, 4x4 tile). The UVM environment, VHDL port and CI are also unrun.
 - The earlier audit found a vacuous formal proof, a miscounting coverage gate and a wrong multiplier count; these are fixed and logged as errata in [EVIDENCE.md](EVIDENCE.md).
 
-## How this was built
-
-Architecture and scope are mine. The RTL, testbenches, scripts and docs were
-written by AI agents (Claude Code, with a review pass by Claude Opus and
-Codex GPT-5), and the agent configuration is in `.claude/` and `CLAUDE.md`.
-Verified blocks are marked Ready, not Done, in [PLAN.md](PLAN.md): Done also
-requires my own from-scratch rebuild and defense of each block, which has not
-happened yet. [process/](process/) holds the build rules and the history of
-that workflow.
-
 ## Run it
 
 Needs verilator, verible, cocotb 2.x, yosys and sby (the OSS CAD Suite covers all but verible).
