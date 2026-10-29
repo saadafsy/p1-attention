@@ -14,19 +14,19 @@ agents build rtl/ and formal/ in builder mode; my ownership is the Mode-B replic
 - [Ready] model/attn.py        (domain: sandbox)  built per builder-mode decision; crosscheck green (make model-check, EVIDENCE row)
 - [Ready] model/attn.cpp       (domain: sandbox)  built per builder-mode decision; bit-identical to attn.py on 14 cases
 
-## Phase 1: Core datapath RTL (I write; agent tutors + reviews)
+## Phase 1: Core datapath RTL (agent-built; owner replication pending)
 - [Building] rtl/mac_unit.sv       (domain: sandbox)  re-verify: TB seed plumbing fixed 2026-09-18 (was fixed-seed); last verify row verify-mac_unit
 - [Ready] rtl/matmul_tile.sv       (domain: sandbox)  roster-built; verify green, both auditors countersigned; awaits grill
 - [Building] rtl/online_softmax.sv (domain: sandbox)  re-verify: PIPE_ROM=1 coverage gate + observed pipe bins added 2026-09-18 (RTL unchanged); last verify row verify-online_softmax
-- [Todo] tb/* self-checking vs golden model  (domain: sandbox)  owner: ME (agent may scaffold harness)
+- [Ready] tb/* self-checking vs golden model  (domain: sandbox)  agent-written cocotb TBs, green in the verify rows; owner has not yet rewritten them (stale 'owner: ME [Todo]' corrected 2026-10-29)
 
 ## Phase 2: Integration + benchmark
 - [Building] rtl/attention_top.sv  (domain: sandbox)  re-verify: shared-PV datapath rewrite, depth-180 prove+cover formal, 4 new tests + functional coverage gate, line-coverage waivers (2026-09-18); last verified revision: verify-attention_top rows
 - [Ready] benchmark vs CPU golden  (domain: sandbox)  docs/benchmark.md + tb/attention_top/cycles.txt + build/cpu_baseline.txt
 
 ## Phase 3: Verification (cocotb + coverage + SVA)
-- [Todo] tb/softmax coverage model + constrained-random  (domain: sandbox)  owner: ME
-- [Todo] formal/online_softmax_props.sv                    (domain: sandbox)  owner: ME
+- [Ready] tb/softmax coverage model + constrained-random  (domain: sandbox)  agent-written, tb/online_softmax/test_softmax_coverage.py, 52/52 bins (EVIDENCE phase3-closure); owner replication pending
+- [Ready] formal/online_softmax.sby exact-max property     (domain: sandbox)  agent-written, 18 asserts PASS (EVIDENCE phase3-closure); owner replication pending
 
 ## Phase 4: Synthesis + STA
 - [Ready] synth + OpenSTA report, one pipelining iteration  (domain: sandbox)  PIPE_ROM registered-ROM variant of online_softmax (uarch 8.2.1, default 0 bit-identical); 38.5 -> 76.9 MHz sky130 tt for +9% area; dual re-audit + GLS both configs; phase4-sta EVIDENCE row; 10ns NOT met in either config (documented)
