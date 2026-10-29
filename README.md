@@ -40,7 +40,6 @@ flowchart LR
 - Scale is small (D = 16, N <= 64, 4x4 tile). The UVM environment, VHDL port and CI are also unrun.
 - The earlier audit found a vacuous formal proof, a miscounting coverage gate and a wrong multiplier count; these are fixed and logged as errata in [EVIDENCE.md](EVIDENCE.md).
 
-
 ## Run it
 
 Needs verilator, verible, cocotb 2.x, yosys and sby (the OSS CAD Suite covers all but verible).
