@@ -135,7 +135,7 @@ def decode_cycles(data):
 
 
 # ---- Pure drain / resync logic (bytes/callables in, plain values out) -----
-# Auditor finding (guide 6.3.4): a framing-error break long enough to span
+# Review finding (guide 6.3.4): a framing-error break long enough to span
 # more than one uart_rx retry attempt can produce a LEGITIMATE (framing-
 # valid) phantom byte once the line returns to idle mid-attempt -- typically
 # all-1s, an unknown command, so the device transmits an UNSOLICITED NAK

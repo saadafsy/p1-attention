@@ -1,7 +1,13 @@
-# docs/guide.md: Streaming Attention Engine, Phases -1 to 5 (builder documentation)
+# docs/guide.md: Streaming Attention Engine, Phases -1 to 5 (design walkthrough)
+
+Note (2026-11-08): this walkthrough predates the timing work of uarch.md
+8.4. Its timing and power numbers (38.5 / 76.9 MHz and the power proxy at
+those clocks) and its description of the two-lookup exp ROM
+(rtl/exp_lut_2p.sv, since replaced by rtl/exp_lut_1p.sv) are historical.
+Current numbers: docs/benchmark.md. Current microarchitecture: uarch.md 8.4.
 
 Scope of this document: Phase -1 (toolchain smoke test), Phase 0 (bit-accurate
-golden models), the four dual-countersigned RTL modules (mac_unit,
+golden models), the four independently re-run RTL modules (mac_unit,
 matmul_tile, online_softmax, attention_top), and the closed Phases 3, 4 and 5
 (functional coverage plus exact-max formal; the PIPE_ROM pipelining iteration
 with sky130 synthesis, OpenSTA timing and gate-level simulation; the
@@ -10,11 +16,8 @@ GDS/silicon) are future work and stay PENDING-HARDWARE where they need a
 bench. Every result claim in this document cites an EVIDENCE.md row id in
 brackets, for example [EVIDENCE: verify-mac_unit]. Numbers not present in
 EVIDENCE.md cite the repo artifact they were read from, or show their
-derivation inline. Per PLAN.md, everything through Phase 5 is [Ready], not
-[Done]: the Done gate additionally requires the project owner's Mode-B
-replication pass, which has not happened; "closed" below means what it means
-in PLAN.md and EVIDENCE.md (verify green, evidence row, countersigned). No em
-dashes are used anywhere in this file, per the project docs rule.
+derivation inline. "Closed" below means verify green with an EVIDENCE.md
+row and an independent re-run (docs/design_rules.md).
 
 ## 1. What this is
 
@@ -36,7 +39,7 @@ always specified (arithmetic per column unchanged), and formal/attention_top
 now proves completion at depth 180 instead of vacuously at depth 10. Those
 changes have NOT yet been re-run through make verify (no toolchain on the
 machine that made them); until the new verify-attention_top-<stamp> row
-exists, attention_top's status is [Building] in PLAN.md and every
+exists, attention_top's status is "needs re-run" and every
 attention_top result below describes the last verified revision.
 
 Honest status in one sentence: the design is verified in simulation and
@@ -54,10 +57,10 @@ fabricated (both are PENDING-HARDWARE).
 |------|--------|----------|
 | Phase -1: tool_smoke through the full verify pipeline | PASS | [EVIDENCE: verify-tool_smoke] |
 | Phase 0: golden models bit-identical, LUT emitted, float gate met | PASS | [EVIDENCE: model-crosscheck] |
-| rtl/mac_unit.sv | verify green, dual countersigned | [EVIDENCE: verify-mac_unit], [EVIDENCE: audit-mac_unit-lint-synth], [EVIDENCE: audit-mac_unit-formal-coverage] |
-| rtl/matmul_tile.sv | verify green, dual countersigned | [EVIDENCE: verify-matmul_tile], [EVIDENCE: audit-matmul_tile-lint-synth], [EVIDENCE: audit-matmul_tile-formal-coverage] |
-| rtl/online_softmax.sv | verify green, dual countersigned; re-audited after PIPE_ROM parameterization | [EVIDENCE: verify-online_softmax], [EVIDENCE: audit-online_softmax-lint-synth], [EVIDENCE: audit-online_softmax-formal-coverage], [EVIDENCE: audit-online_softmax-pipe-lint-synth], [EVIDENCE: audit-online_softmax-pipe-formal-coverage] |
-| rtl/attention_top.sv (Phase 2) | verify green incl. BRAM-pattern memories, dual countersigned | [EVIDENCE: verify-attention_top], [EVIDENCE: bram-conversion-attention_top], [EVIDENCE: audit-attention_top-lint-synth], [EVIDENCE: audit-attention_top-formal-coverage] |
+| rtl/mac_unit.sv | verify green, independent re-runed | [EVIDENCE: verify-mac_unit], [EVIDENCE: audit-mac_unit-lint-synth], [EVIDENCE: audit-mac_unit-formal-coverage] |
+| rtl/matmul_tile.sv | verify green, independent re-runed | [EVIDENCE: verify-matmul_tile], [EVIDENCE: audit-matmul_tile-lint-synth], [EVIDENCE: audit-matmul_tile-formal-coverage] |
+| rtl/online_softmax.sv | verify green, independent re-runed; re-audited after PIPE_ROM parameterization | [EVIDENCE: verify-online_softmax], [EVIDENCE: audit-online_softmax-lint-synth], [EVIDENCE: audit-online_softmax-formal-coverage], [EVIDENCE: audit-online_softmax-pipe-lint-synth], [EVIDENCE: audit-online_softmax-pipe-formal-coverage] |
+| rtl/attention_top.sv (Phase 2) | verify green incl. BRAM-pattern memories, independent re-runed | [EVIDENCE: verify-attention_top], [EVIDENCE: bram-conversion-attention_top], [EVIDENCE: audit-attention_top-lint-synth], [EVIDENCE: audit-attention_top-formal-coverage] |
 | Phase 2 benchmark vs CPU golden | closed (docs/benchmark.md) | tb/attention_top/cycles.txt, build/cpu_baseline.txt |
 | Phase 3: functional coverage + exact-max formal | closed, 52/52 reachable bins, 18 asserts PASS | [EVIDENCE: phase3-closure] |
 | Phase 4: PIPE_ROM variant, sky130 STA, GLS | closed; 10 ns NOT met in either softmax config (documented) | [EVIDENCE: phase4-sta] |
@@ -269,7 +272,7 @@ Why a generated .svh case function instead of $readmemh: initial blocks are
 banned in RTL by the project coding standard, and a memory file path would
 resolve differently across the verilator, yosys, sby, and cocotb working
 directories (docs/uarch.md 8.2). The generated function keeps the ROM
-synthesizable, initial-free, and path-independent. The lint-synth auditor
+synthesizable, initial-free, and path-independent. The lint/synth review
 independently re-emitted the .svh and confirmed it diff-identical to the
 generator output [EVIDENCE: audit-online_softmax-lint-synth], and confirmed
 this again after the Phase 4 parameterization
@@ -379,7 +382,7 @@ formal) [EVIDENCE: verify-mac_unit].
 
 Simulation (tb/mac_unit/test_mac_unit.py, cocotb under verilator, drive on
 RisingEdge, sample on FallingEdge): 4 tests, all passing, independently
-re-run by the formal-coverage auditor; note that the two-seed re-run in
+re-run by the formal/coverage review; note that the two-seed re-run in
 that row exercised identical random vectors because the RNGs were fixed
 literals at the time (section 4.5; fixed 2026-09-18, not yet re-run)
 [EVIDENCE: audit-mac_unit-formal-coverage]:
@@ -404,7 +407,7 @@ the raw counter file is tb/mac_unit/coverage.dat (8 of 8 instrumented
 points hit).
 
 Synthesis: yosys check reports 0 problems, no $_DLATCH_ cells, netlist
-latch-free; independently re-run and countersigned
+latch-free; independently re-run and independently re-checked
 [EVIDENCE: audit-mac_unit-lint-synth]. Log: build/synth_full.log (the
 PROC_DLATCH pass reports "No latch inferred" for prod, base, and acc_n).
 
@@ -416,7 +419,7 @@ mac_unit netlist meets the 10 ns target period with +4.101 ns setup slack
 Formal (formal/mac_unit.sby: BMC, depth 20, smtbmc z3): the FORMAL block in
 rtl/mac_unit.sv restates the five-row control contract as immediate
 assertions over $past values; sby returned PASS
-[EVIDENCE: verify-mac_unit], re-run by the auditor
+[EVIDENCE: verify-mac_unit], re-run by the reviewer
 [EVIDENCE: audit-mac_unit-formal-coverage]. Proof log:
 formal/mac_unit/logfile.txt ("DONE (PASS, rc=0)"). The property block,
 pasted from rtl/mac_unit.sv:
@@ -447,11 +450,11 @@ SystemVerilog multiplication equals mathematical multiplication. Numerical
 correctness against an independent reference is the simulation's job (the
 cocotb mirror and the golden-model dot products).
 
-### 4.5 Known gaps (auditor findings, stated honestly)
+### 4.5 Known gaps (review findings, stated honestly)
 
 - The mac_unit testbench RNGs WERE fixed literals (random.Random(2) and
   random.Random(3)), so the Makefile SEED variable did not change this
-  module's random stimulus and the auditor's two-seed re-run repeated
+  module's random stimulus and the reviewer's two-seed re-run repeated
   identical random tests [EVIDENCE: audit-mac_unit-formal-coverage]. Fixed
   2026-09-18 (seeded_rng() from cocotb.RANDOM_SEED, the house style of
   every later testbench); the fix has not been re-run, so the "two seeds"
@@ -541,11 +544,11 @@ docs/uarch.md 8.1). The entire body, pasted from rtl/matmul_tile.sv:
 ```
 
 Flop count derivation: 16 mac_units x one 24-bit accumulator each =
-16 * 24 = 384 flip-flops, and the auditor's independent synthesis re-run
+16 * 24 = 384 flip-flops, and the reviewer's independent synthesis re-run
 reports exactly 384 FFs in the latch-free netlist
 [EVIDENCE: audit-matmul_tile-lint-synth]. The signed'() casts matter: the
 +: slices of the unsigned flat buses would otherwise zero-extend and break
-negative operands; the auditor verified packing and signedness against
+negative operands; the reviewer verified packing and signedness against
 docs/uarch.md 8.1 [EVIDENCE: audit-matmul_tile-lint-synth].
 
 Common mistake this tile's testbench targets: a transposed wiring bug
@@ -629,8 +632,8 @@ the other 15 elements. That is exactly what the cocotb testbench covers
 exhaustively instead (all 16 elements compared on every trial of every
 test, including the asymmetric broadcast_independence pattern built to
 catch the transposed-wiring bug that a single-element formal check cannot
-see). The auditor re-ran the proof, inspected the generated SMT2 to confirm
-the remaining assertions are non-vacuous, and countersigned the reduction
+see). The reviewer re-ran the proof, inspected the generated SMT2 to confirm
+the remaining assertions are non-vacuous, and independently re-checked the reduction
 as justified [EVIDENCE: audit-matmul_tile-formal-coverage].
 
 ### 5.5 Known gaps
@@ -638,7 +641,7 @@ as justified [EVIDENCE: audit-matmul_tile-formal-coverage].
 - Formal covers the shared-control glue over the full 384-bit bus plus one
   spot-checked element; per-element datapath assurance for 15 of 16
   elements is simulation-only (by design, documented in the .sby file and
-  countersigned [EVIDENCE: audit-matmul_tile-formal-coverage]).
+  independently re-checked [EVIDENCE: audit-matmul_tile-formal-coverage]).
 - BMC depth 5 covers the control contract (every assertion is a one-cycle
   relation over $past); multi-hundred-cycle accumulations are simulation
   territory, as with mac_unit.
@@ -662,7 +665,7 @@ m     <= m_new
 Since Phase 4 the module carries one parameter, PIPE_ROM (docs/uarch.md
 8.2.1). PIPE_ROM = 0, the default and the configuration attention_top
 instantiates, is the normative single-cycle recurrence documented in this
-section; the lint-synth auditor confirmed the default generate branch
+section; the lint/synth review confirmed the default generate branch
 byte-identical to the previously audited arithmetic
 [EVIDENCE: audit-online_softmax-pipe-lint-synth]. PIPE_ROM = 1 is the
 registered-ROM timing variant, documented in section 9. Ports, from
@@ -838,10 +841,10 @@ test_online_softmax.py, directed_sequences).
 
 `make verify MODULE=online_softmax` exits 0
 [EVIDENCE: verify-online_softmax]. The module was verified and dual
-countersigned first in latency-1-only form
+independently re-checked first in latency-1-only form
 [EVIDENCE: audit-online_softmax-lint-synth],
 [EVIDENCE: audit-online_softmax-formal-coverage], then re-audited in full by
-both auditors after the Phase 4 PIPE_ROM parameterization
+both reviewers after the Phase 4 PIPE_ROM parameterization
 [EVIDENCE: audit-online_softmax-pipe-lint-synth],
 [EVIDENCE: audit-online_softmax-pipe-formal-coverage].
 
@@ -975,7 +978,7 @@ n_len a multiple of 4 in [4, 64]). It owns everything the leaf modules do
 not: the Q/K/V/output memories, the sequencing FSM, the score conversion
 (rounding site 1), the NUM accumulators (rounding site 4), and the output
 divider bank (rounding site 5). Normative spec: docs/uarch.md 8.3.
-`make verify MODULE=attention_top` exits 0, and both auditors countersigned
+`make verify MODULE=attention_top` exits 0, and both reviewers independently re-checked
 [EVIDENCE: verify-attention_top], [EVIDENCE: audit-attention_top-lint-synth],
 [EVIDENCE: audit-attention_top-formal-coverage]. Ports, pasted verbatim from
 rtl/attention_top.sv:
@@ -1258,7 +1261,7 @@ BRAM inference). Measured results, from the evidence row
 (The generic-synth DFF count RISES slightly because generic mapping flattens
 RAM to FFs either way; the 4 $mem_v2 cells at the memory stage are the
 inference-ready signal a BRAM-aware backend consumes, not the generic FF
-count.) The lint-synth auditor independently confirmed the four memories and
+count.) The lint/synth review independently confirmed the four memories and
 their geometries: q_word_mem 256x32, k_word_mem 256x32, v_mem 64x128,
 out_mem 64x128, all WR_PORTS=1 RD_PORTS=1
 [EVIDENCE: audit-attention_top-lint-synth].
@@ -1332,7 +1335,7 @@ At n_len = 64 (nblk = 16): 16 * (256 + 156) + 1 = 16 * 412 + 1 = 6593. The
 cocotb testbench reads cycle_count on every run and checks it against this
 closed form; the recorded values (tb/attention_top/cycles.txt) are 173, 377,
 881, 2273, 6593 for N = 4, 8, 16, 32, 64, every one matching the formula
-exactly. The formal-coverage auditor re-verified the formula independently
+exactly. The formal/coverage review re-verified the formula independently
 [EVIDENCE: audit-attention_top-formal-coverage].
 
 ### 7.7 Verification evidence
@@ -1368,13 +1371,13 @@ from a 22-bin functional coverage model (n_len classes, control corners,
 input/output extremes, readback) that the coverage gate now consumes.
 
 Line coverage: the check_coverage.py gate passed inside make verify, and the
-formal-coverage auditor confirmed every missed point is
+formal/coverage review confirmed every missed point is
 unreachable-defensive code [EVIDENCE: audit-attention_top-formal-coverage].
 Correction (2026-09-18, review finding F004): that gate pooled branch and
 line records; the tracked artifact's true LINE coverage was 46/53 = 86.8%,
 below the 90% threshold, and passed only as 144/151 = 95.4% pooled. The
 seven unhit lines are exactly the defensive saturation arms and `default:`
-case arms the auditor called unreachable; they are now declared waivers
+case arms the reviewer called unreachable; they are now declared waivers
 (tb/attention_top/coverage_waivers.txt) and the parser counts t=line only,
 so the effective figure is 46/46 with the raw figure printed beside it.
 Raw counters: tb/attention_top/coverage.dat (generated, no longer tracked).
@@ -1422,7 +1425,7 @@ chformal -assert -remove matmul_tile
 chformal -assert -remove online_softmax
 ```
 
-  Each stripped contract is already proven standalone and countersigned in
+  Each stripped contract is already proven standalone and independently re-checked in
   its own .sby run over the identical, unmodified module; re-proving them
   inside an integration BMC that also elaborates 3 RAMs, a ROM, 32
   multipliers, and a 16-wide divider bank is redundant solver load. The
@@ -1431,9 +1434,9 @@ chformal -assert -remove online_softmax
   about a minute pre-conversion; the trials are documented in the .sby
   header.
 
-The formal-coverage auditor judged the whole reduction chain sound and
+The formal/coverage review judged the whole reduction chain sound and
 re-ran everything independently
-[EVIDENCE: audit-attention_top-formal-coverage]; the lint-synth auditor
+[EVIDENCE: audit-attention_top-formal-coverage]; the lint/synth review
 verified the prefetch logic against the FSM, the divider against
 docs/uarch.md 3.8, lint clean, yosys check 0 problems, no $_DLATCH_
 [EVIDENCE: audit-attention_top-lint-synth].
@@ -1538,7 +1541,7 @@ had ever reached the bound.
 ### 8.2 The exact-max formal property
 
 The original property list asserted m monotone non-decreasing within a row.
-The formal-coverage auditor flagged the weakness: a bug that latched a WRONG
+The formal/coverage review flagged the weakness: a bug that latched a WRONG
 value larger than $past(m) would still look monotonic. Phase 3 added a
 property that pins m to the exact recurrence, solver-cheap because it only
 compares already-registered values (no ROM, no multiplier). Pasted verbatim
@@ -1550,7 +1553,7 @@ from rtl/online_softmax.sv (g_f_lat1; the same pair also lives in g_f_lat2):
             // audited property list); the exact-max recurrence strictly
             // subsumes it.
             assert (m >= $past(m));
-            // Formal-coverage auditor finding: the monotonicity assert above
+            // Formal-coverage review finding: the monotonicity assert above
             // passes even if m latched a wrong value larger than $past(m) (a
             // bug that overshoots the true max would still look monotonic).
             // This property pins m to the exact section-6 recurrence
@@ -1581,7 +1584,7 @@ the rest of the design. The parameter contract:
 
 - PIPE_ROM = 0 (default): elaborates exactly the single-cycle logic of
   section 6; out_valid latency 1; the configuration attention_top
-  instantiates. The lint-synth auditor confirmed the g_lat1 branch
+  instantiates. The lint/synth review confirmed the g_lat1 branch
   byte-identical to the previously audited arithmetic
   [EVIDENCE: audit-online_softmax-pipe-lint-synth].
 - PIPE_ROM = 1: the critical path diff -> clamp -> index -> ROM ->
@@ -1674,7 +1677,7 @@ rtl/online_softmax.sv:
 ```
 
 Added state derivation: w_p (16) + r_p (16) + v_p (1) + rs_p (1) = 34 extra
-flip-flops, 73 + 34 = 107, and the auditor's netlist count is exactly 107
+flip-flops, 73 + 34 = 107, and the reviewer's netlist count is exactly 107
 [EVIDENCE: audit-online_softmax-pipe-lint-synth].
 
 ### 9.2 The parameter-config testbench
@@ -1708,7 +1711,7 @@ reset_mid_pipe_elements_in_flight,
 drain_falls_exactly_2_cycles_after_last_in_valid,
 m_leads_out_valid_by_one_on_max_update, den_worst_case_lat2_l_eq_2p23; the
 report shows 6/6 hit. Beyond re-running everything on two seeds, the
-formal-coverage auditor wrote an independent 300-stream scratch check
+formal/coverage review wrote an independent 300-stream scratch check
 proving the two elaborations produce value-identical (m, l, w, r) sequences,
 and noted the one corner simulation left open (row_start asserted without
 in_valid) is closed by the formal alignment properties
@@ -1744,7 +1747,7 @@ recurrence, and the latency-2 alignment expressed purely over ports with two
 reset-free history cycles (out_valid equals in_valid two cycles earlier;
 l, w, r hold and out_valid is low when no element was accepted two cycles
 earlier), so no assertion reaches into the g_lat2 pipe registers or assumes
-anything about their pre-reset values. Both PASS at depth 20; the auditor
+anything about their pre-reset values. Both PASS at depth 20; the reviewer
 verified in the generated SMT that the p1 model really elaborates g_lat2
 (the chparam took effect) and that both tasks are non-vacuous
 [EVIDENCE: audit-online_softmax-pipe-formal-coverage]. As with p0, value
@@ -1773,7 +1776,7 @@ numbers below are read from the named logs; Fmax is derived as 1/period.
 
 Derived deltas: 26/13 = 2.0x Fmax; 26880.8 / 24587.3 = 1.093, +9.3% area.
 One pipelining iteration bought 2.0x tool-estimated Fmax for +9% area. The
-lint-synth auditor confirmed in the STA path report that the stage cut is
+lint/synth review confirmed in the STA path report that the stage cut is
 real and lands where the spec says: the PIPE_ROM=1 worst path ends at the
 w_p pipe register and the multiply is off it
 [EVIDENCE: audit-online_softmax-pipe-lint-synth].
@@ -1784,7 +1787,7 @@ matmul_tile meet 10 ns (+4.101 ns slack each, build/sta_mac_unit.log,
 build/sta_matmul_tile.log); the softmax recurrence is the design's Fmax
 limiter even after pipelining, and closing 10 ns would need a second cut
 through the multiply/rshr/add stage, out of scope for Phase 4's
-one-iteration brief. Both auditors' reports and the evidence row flag this
+one-iteration brief. Both reviewers' reports and the evidence row flag this
 explicitly [EVIDENCE: phase4-sta],
 [EVIDENCE: audit-online_softmax-pipe-lint-synth].
 
@@ -1847,7 +1850,7 @@ sby inside `make verify`. The fix, pasted from the Makefile:
 
 Impact assessment, stated honestly: no unproven formal claim ever shipped,
 because every formal PASS in EVIDENCE.md was independently established by
-auditors invoking sby directly (each audit row's command column lists the
+reviewers invoking sby directly (each audit row's command column lists the
 sby re-run), and the standalone sby runs of Phases 3 and 4 are their own
 evidence [EVIDENCE: phase3-closure], [EVIDENCE: phase4-sta]. What the fix
 changes is the gate itself: from this commit on, `make verify` genuinely
@@ -1949,7 +1952,7 @@ this project, and none is claimed.
 
 | Item | Status |
 |------|--------|
-| Phases -1 to 5 | closed per PLAN.md/EVIDENCE.md ([Ready]; [Done] additionally requires the owner's Mode-B replication pass, not yet run) |
+| Phases -1 to 5 | closed per EVIDENCE.md (verify green, independently re-run) |
 | Phase 6: FPGA bring-up (Basys 3, docs/phase6_fpga_guide.md) | PENDING-HARDWARE (needs a real board and user bench evidence) |
 | Phase 7: OpenLane RTL-to-GDS + routed-parasitic power | future work (sandbox-achievable, not started; docs/phase7_physical_guide.md) |
 | Phase 7: TinyTapeout silicon | PENDING-HARDWARE (not taped out; needs user evidence) |
@@ -1973,8 +1976,8 @@ Bullet 2: "Designed and verified the attention core datapath in
 SystemVerilog (MAC, 4x4 output-stationary matmul tile, online softmax)
 [each passing cocotb simulation against the golden model on multiple seeds,
 functional and line coverage gates, latch-free yosys synthesis, and
-SymbiYosys bounded proofs, all independently re-run and countersigned by
-two auditors]."
+SymbiYosys bounded proofs, all independently re-run and independently re-checked by
+two reviewers]."
 
 | Clause | Evidence |
 |--------|----------|
@@ -1985,14 +1988,14 @@ two auditors]."
 Bullet 3: "Integrated the full engine (tiled matmul + online softmax + NUM
 accumulation + restoring divider bank) behind BRAM-inferable single-port
 memories [bit-exact end to end against the golden model on two seeds,
-control-only bounded formal, dual auditor countersign; the memory rewrite
+control-only bounded formal, independent re-runs; the memory rewrite
 cut formal runtime from about 60 s to 2.8 s and synthesis from 5m23s/4.77GB
 to 1m15s/1.25GB while staying bit-identical; 6593 cycles for N = 64,
 matching the closed-form cycle model exactly]."
 
 | Clause | Evidence |
 |--------|----------|
-| end-to-end bit-exact, verify green, countersigned (for the revision before the 2026-09-18 shared-PV rewrite; re-verification pending) | [EVIDENCE: verify-attention_top], [EVIDENCE: audit-attention_top-lint-synth], [EVIDENCE: audit-attention_top-formal-coverage] |
+| end-to-end bit-exact, verify green, independently re-checked (for the revision before the 2026-09-18 shared-PV rewrite; re-verification pending) | [EVIDENCE: verify-attention_top], [EVIDENCE: audit-attention_top-lint-synth], [EVIDENCE: audit-attention_top-formal-coverage] |
 | BRAM conversion numbers, bit-identical | [EVIDENCE: bram-conversion-attention_top] |
 | cycle counts vs closed form | tb/attention_top/cycles.txt, [EVIDENCE: audit-attention_top-formal-coverage] |
 
@@ -2007,7 +2010,7 @@ open timing limiter; not implemented on FPGA, not taped out]."
 | Clause | Evidence |
 |--------|----------|
 | variant, STA numbers, 10 ns not met, GLS 0 errors | [EVIDENCE: phase4-sta], build/sta_online_softmax*.log, build/gls_lat*.log |
-| dual re-audit of the parameterization | [EVIDENCE: audit-online_softmax-pipe-lint-synth], [EVIDENCE: audit-online_softmax-pipe-formal-coverage] |
+| independent re-run of the parameterization | [EVIDENCE: audit-online_softmax-pipe-lint-synth], [EVIDENCE: audit-online_softmax-pipe-formal-coverage] |
 
 Bullet 5 (interim voice, proxy estimates only): "Quantified the pipelining
 tradeoff with an identical-stimulus gate-level switching-activity proxy

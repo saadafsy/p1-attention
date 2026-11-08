@@ -21,12 +21,33 @@ from pathlib import Path
 BLOCKS = [
     (r"u_tile", "matmul_tile (Q.K^T MAC array)"),
     (r"u_sm|g_softmax", "online_softmax lane (max/LUT/rescale recurrence)"),
-    (r"g_pv|pv_next|acc_num|pv_lane", "shared PV datapath / NUM accumulators"),
-    (r"g_div|qt_reg|rem_reg|abs_a_reg", "divider bank"),
-    (r"q_word_mem|k_word_mem|v_mem|out_mem|q_flat|k_flat|v_row_reg|rd_data", "memory (flattened DFF-RAM) and read paths"),
+    (r"g_pv|pva_|acc_num|lsel|rs_d", "shared PV datapath / NUM accumulators"),
+    (r"g_div|qt_reg|rem_reg|abs_a_reg|row_c", "divider bank"),
+    (r"u_qmem|u_kmem|u_vmem|u_outmem|q_flat|k_flat|v_row_reg|rd_col_q|rd_data", "memory pins (SRAM stand-in) and read paths"),
     (r"drain_buf|s_conv|s_shift", "drain buffer / score conversion"),
-    (r"state|rg|kb|div_cnt|cycle_count|nblk", "FSM / counters"),
+    (r"\b(state|rg|kb|t|row|div_cnt|cycle_count|nblk_reg|done)\b", "FSM / counters"),
 ]
+
+
+def flop_nets(netlist):
+    """Map flip-flop instance name -> its Q net name. Flattened yosys
+    netlists give cells anonymous names (_123_), but the register's net
+    keeps the RTL name, which is what identifies the block."""
+    nets = {}
+    cell = None
+    for line in Path(netlist).read_text(errors="replace").splitlines():
+        m = re.match(r"\s*sky130_fd_sc_hd__df\w*\s+(\S+)\s*\(", line)
+        if m:
+            cell = m.group(1)
+            continue
+        if cell:
+            m = re.search(r"\.Q\((.+)\)", line)
+            if m:
+                nets[cell] = m.group(1).strip()
+                cell = None
+            elif line.strip().startswith(");"):
+                cell = None
+    return nets
 
 
 def parse(text):
@@ -57,11 +78,12 @@ def parse(text):
     return [p for p in paths if p["slack"] is not None and p["end"]]
 
 
-def owner(path):
-    text = "\n".join(path["lines"]) + path["start"] + path["end"]
-    for pat, name in BLOCKS:
-        if re.search(pat, text):
-            return name
+def owner(names):
+    """Classify by the start/end register (net) names, startpoint first."""
+    for text in names:
+        for pat, name in BLOCKS:
+            if re.search(pat, text):
+                return name
     return "unclassified (inspect the path)"
 
 
@@ -70,7 +92,10 @@ def main():
     ap.add_argument("log")
     ap.add_argument("--period", type=float, required=True)
     ap.add_argument("--out")
+    ap.add_argument("--netlist", help="gate netlist, to name anonymous flops by their Q net")
     a = ap.parse_args()
+    nets = flop_nets(a.netlist) if a.netlist else {}
+    name = lambda c: f"{c} ({nets[c]})" if c in nets else c
     text = Path(a.log).read_text(errors="replace")
     paths = parse(text)
     setup = [p for p in paths if p["kind"] == "max"]
@@ -80,17 +105,20 @@ def main():
         return 1
     worst = min(setup, key=lambda p: p["slack"])
     lines = [
-        f"# attention_top STA summary (flattened standard-cell estimate, sky130 tt; memories are DFF-RAM, no SRAM macro modeled)",
+        "# attention_top STA summary (pre-layout standard-cell estimate, sky130 tt; the four",
+        "# memories are SRAM-macro stand-ins: flops at the macro pins, macro access time not modeled)",
         f"source: {a.log}",
         f"clock period: {a.period} ns",
         f"setup WNS: {worst['slack']:+.3f} ns ({'MET' if worst['slack'] >= 0 else 'VIOLATED'})",
-        f"implied Fmax at this WNS: {1000.0 / (a.period - worst['slack']):.1f} MHz (1/(period - WNS); tool estimate)",
-        f"worst setup path: {worst['start']} -> {worst['end']}",
-        f"owning block: {owner(worst)}",
+        f"implied Fmax at this WNS: {1000.0 / (a.period - min(worst['slack'], 0.0)):.1f} MHz "
+        "(1/(period - WNS) when violated; tool estimate)",
+        f"worst setup path: {name(worst['start'])} -> {name(worst['end'])}",
+        f"owning block: {owner([nets.get(worst['start'], worst['start']), nets.get(worst['end'], worst['end'])])}",
     ]
     if hold:
         wh = min(hold, key=lambda p: p["slack"])
-        lines.append(f"hold worst slack: {wh['slack']:+.3f} ns ({'MET' if wh['slack'] >= 0 else 'VIOLATED'}), {wh['start']} -> {wh['end']}")
+        lines.append(f"hold worst slack: {wh['slack']:+.3f} ns ({'MET' if wh['slack'] >= 0 else 'VIOLATED'}), "
+                     f"{name(wh['start'])} -> {name(wh['end'])}")
     lines.append("")
     lines.append("worst setup path detail:")
     lines += ["  " + l for l in worst["lines"]]

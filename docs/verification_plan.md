@@ -4,7 +4,7 @@ Status of this document: Phase 5 deliverable (process/P1_Attention_Engine_Build_
 PHASE 5), retroactively formalized, refreshed 2026-09-18 to the ledger state (the
 previous revision still described attention_top as unverified and the exact-max
 property as planned; review finding M3/F006). All four RTL modules have verify-green
-EVIDENCE.md rows and dual auditor countersigns; every claim about a completed module
+EVIDENCE.md rows and independent re-runs; every claim about a completed module
 cites an EVIDENCE.md row id in brackets, for example [EVIDENCE: verify-mac_unit].
 Where the 2026-09-18 review changed a gate or a proof, the section says what was
 measured before and what the gate now requires. No em dashes are used anywhere in
@@ -115,14 +115,14 @@ considered green.
 
 mac_unit was the one documented exception: its testbench RNGs were fixed literals,
 `random.Random(2)` and `random.Random(3)`, so the Makefile's `SEED` variable did not
-change mac_unit's random stimulus and the auditor's two-seed re-run repeated
+change mac_unit's random stimulus and the reviewer's two-seed re-run repeated
 identical random tests [EVIDENCE: audit-mac_unit-formal-coverage]. Fixed 2026-09-18
 (seeded_rng() in tb/mac_unit/test_mac_unit.py), not yet re-run. The finding had
 already been fixed in every later testbench: tb/matmul_tile/test_matmul_tile.py and
 tb/online_softmax/test_online_softmax.py both build every RNG as
 `random.Random(cocotb.RANDOM_SEED)` inside a `seeded_rng()` helper (with a fallback
 only if the attribute is somehow absent), documented in each file's own module
-docstring as a "mandatory carried-forward auditor finding." Both modules' two-seed
+docstring as a "mandatory carried-forward review finding." Both modules' two-seed
 re-runs (SEED=1, SEED=7) therefore provably exercise different random stimulus
 [EVIDENCE: audit-matmul_tile-formal-coverage], [EVIDENCE: audit-online_softmax-formal-coverage].
 
@@ -192,7 +192,7 @@ time read:
 
 attention_top's true line coverage was therefore BELOW the 90% gate and passed only
 by pooling. Its seven unhit lines are the defensive saturation arms and the
-`default:` case arms the auditor had already judged unreachable
+`default:` case arms the reviewer had already judged unreachable
 [EVIDENCE: audit-attention_top-formal-coverage]; they are now declared, one per
 line with a reason, in tb/attention_top/coverage_waivers.txt, and the gate prints
 raw, waived and effective figures (effective 46/46). The online_softmax miss (the
@@ -291,11 +291,11 @@ that must reach `cover (done)`. Neither task has been run yet.
 
 | .sby file | Strips assertions from | Justification |
 |-----------|--------------------------|----------------|
-| formal/matmul_tile.sby | `mac_unit` | The 16 mac_unit instances are wired identically by the same generate body; the contract is already proven standalone at depth 20 (formal/mac_unit.sby, PASS, auditor-countersigned). Re-proving 16 replicated copies of an identical contract inside the tile-level BMC is redundant solver load for zero additional coverage. |
-| formal/attention_top.sby | `mac_unit`, `matmul_tile`, `online_softmax` | All three submodules are instantiated in attention_top UNMODIFIED (docs/uarch.md 8.3's own words); each contract is already proven standalone and auditor-countersigned (formal/mac_unit.sby, formal/matmul_tile.sby, formal/online_softmax.sby, all PASS). Re-proving them again inside the integration-level BMC would be redundant for zero additional coverage, and the full unstripped netlist (3 RAMs, a ROM, 16+16 multipliers, a 16-wide divider bank, plus the three submodules' own BMC-heavy assertions) is stated in the .sby header to be "far past what open smtbmc/z3 proves in a reasonable budget." |
+| formal/matmul_tile.sby | `mac_unit` | The 16 mac_unit instances are wired identically by the same generate body; the contract is already proven standalone at depth 20 (formal/mac_unit.sby, PASS, independently re-run). Re-proving 16 replicated copies of an identical contract inside the tile-level BMC is redundant solver load for zero additional coverage. |
+| formal/attention_top.sby | `mac_unit`, `matmul_tile`, `online_softmax` | All three submodules are instantiated in attention_top UNMODIFIED (docs/uarch.md 8.3's own words); each contract is already proven standalone and independently re-run (formal/mac_unit.sby, formal/matmul_tile.sby, formal/online_softmax.sby, all PASS). Re-proving them again inside the integration-level BMC would be redundant for zero additional coverage, and the full unstripped netlist (3 RAMs, a ROM, 16+16 multipliers, a 16-wide divider bank, plus the three submodules' own BMC-heavy assertions) is stated in the .sby header to be "far past what open smtbmc/z3 proves in a reasonable budget." |
 
-Both reductions were independently audited: the formal-coverage auditor re-ran the
-proofs, inspected the generated SMT2, and countersigned them as justified
+Both reductions were independently audited: the formal/coverage review re-ran the
+proofs, inspected the generated SMT2, and independently re-checked them as justified
 [EVIDENCE: audit-matmul_tile-formal-coverage],
 [EVIDENCE: audit-attention_top-formal-coverage]; for attention_top the
 "non-vacuous" verdict holds for the reset, exclusion and monotonicity properties but
@@ -340,14 +340,14 @@ Done"):
    synth-check (yosys, latch-free), and formal (`sby`), in that order.
 2. A `verify-<name>` PASS row is appended to EVIDENCE.md by the `verify` Makefile
    target itself (not hand-written).
-3. Both auditor roles independently re-run and countersign: the lint-synth auditor
-   (independent lint/synth-check/yosys re-run) and the formal-coverage auditor
+3. Both reviewer roles independently re-run and independent re-check: the lint/synth review
+   (independent lint/synth-check/yosys re-run) and the formal/coverage review
    (independent multi-seed sim re-run, coverage re-check, and sby re-run with SMT2
-   inspection of any chformal reduction). Each countersign is its own EVIDENCE.md row.
+   inspection of any chformal reduction). Each independent re-check is its own EVIDENCE.md row.
 4. Only after 1 to 3 does the user's own from-scratch replication ("grill me", Mode B
    of the technical-writer) happen, per docs/design_rules.md and PLAN.md's own rule: "Only Lead
    moves a task to [Done], and only after: make verify exits 0, an EVIDENCE row
-   exists, a Beta auditor countersigned, AND I passed 'grill me'."
+   exists, a Beta reviewer independently re-checked, AND I passed 'grill me'."
 
 Applied to the modules built so far: all four have cleared steps 1 to 3
 [EVIDENCE: verify-mac_unit], [EVIDENCE: audit-mac_unit-lint-synth],
@@ -359,7 +359,7 @@ Applied to the modules built so far: all four have cleared steps 1 to 3
 [EVIDENCE: audit-attention_top-formal-coverage]; none has cleared step 4. Caveat for
 every verify row appended before the 2026-07-16 .PHONY fix: `make formal` was
 silently skipped by make at the time, so those rows' "formal" clause rests on the
-auditors' direct sby runs, not on the verify target (EVIDENCE errata).
+reviewers' direct sby runs, not on the verify target (EVIDENCE errata).
 
 ### 6.1 attention_top: what was checked, and what re-verification is owed
 
@@ -382,7 +382,7 @@ Owed after the 2026-09-18 review (PLAN.md row back to [Building] until done):
 - Run the depth-180 `prove` and `cover` formal tasks and record the achieved depth
   and runtime.
 - Re-synthesize and confirm the multiplier count dropped to the 48 the spec states.
-- Append the resulting rows with unique ids and re-run the dual auditor countersign.
+- Append the resulting rows with unique ids and re-run the independent re-runs.
 
 ## 7. The sandbox/silicon wall, for hardware phases
 

@@ -486,6 +486,10 @@ Naming conventions (binding for all RTL):
 
 ### 8.2 online_softmax: per-row (m, l) state machine (NORMATIVE, Phase 1)
 
+Implementation note (2026-11-08): the port behaviour, values and latencies
+below are unchanged; the internal realization (one ROM lookup per element,
+rtl/exp_lut_1p.sv) is described in 8.4.
+
 Function: the per-row online-softmax recurrence of Section 6 for the running
 max m (SCORE) and denominator l (DEN), EXCLUDING the NUM path and the final
 division (both belong to attention_top). Per consumed score s the module
@@ -647,17 +651,10 @@ Cycle diagram for PIPE_ROM = 1, the same 3-element row as in 8.2:
   w (visible) |  x   |  x   |  w(s0) |  w(s1) |  w(s2) |  w(s2)
   r (visible) |  x   |  x   |  r(s0) |  r(s1) |  r(s2) |  r(s2)
 
-ROM realization in PIPE_ROM = 1 (2026-09-19): the stage-1 registers w_p and
-r_p are the output registers of rtl/exp_lut_2p.sv, a two-read-port ROM
-module (ports addr_a = idx_w, addr_b = idx_r, en = in_valid, 1-cycle
-registered read, reset to 0) that includes the same generated
-rtl/exp_lut.svh case function. The values and the alignment are unchanged
-from the description above; the module boundary exists so an FPGA build
-can substitute fpga/exp_lut_2p_xilinx.sv (`define XILINX_FPGA), an XPM
-dual-port block ROM initialized from fpga/exp_lut.mem (the same bytes as
-model/exp_lut.hex, verified by make model-check), giving one block RAM per
-lane instead of 2 KB of LUT-mux logic on the critical path. PIPE_ROM = 0
-keeps the two combinational reads and does not instantiate the module.
+ROM realization in PIPE_ROM = 1: superseded 2026-11-08 by the single
+registered lookup of 8.4 (rtl/exp_lut_1p.sv, FPGA twin
+fpga/exp_lut_1p_xilinx.sv, one RAMB18 per lane). The values and the
+alignment are unchanged from the description above.
 
 Formal (formal/online_softmax.sby): two tasks, both required green. Task p0
 elaborates the default and keeps the audited latency-1 property list of 8.2
@@ -669,6 +666,10 @@ cycles earlier). Full recurrence checking for PIPE_ROM = 1 (values of l, w,
 r against the golden model) is cocotb's job, exactly as for PIPE_ROM = 0.
 
 ### 8.3 attention_top: 4-row-blocked integration (NORMATIVE, Phase 2)
+
+Implementation note (2026-11-08): the dataflow, port protocol and cycle
+formula below are unchanged; the memories, the PV datapath pipeline, the
+lane select and the score register are now realized as described in 8.4.
 
 Function: stitches matmul_tile (8.1) and online_softmax (8.2), unchanged, into
 the full streaming attention recurrence of Section 6, for N = n_len rows
@@ -952,3 +953,57 @@ FORMAL block now assumes n_len = 4 on the accepted start and
 formal/attention_top.sby runs a `prove` task at depth 180 plus a `cover`
 task that must reach `cover (done)`; a claimed PASS for this module means
 both tasks passed at that depth.
+
+### 8.4 Timing-driven realization (2026-11-08)
+
+Every change below is bit-identical at the ports (same values, same cycle
+on which each output is valid, same cycle_count formula), checked by the
+unchanged cocotb suites against model/attn.py in both PIPE_ROM settings.
+They exist to make the design close timing; measured results are in
+docs/benchmark.md.
+
+online_softmax (rtl/online_softmax.sv):
+- One LUT lookup per element. m_new is either m or s, so one of
+  idx(m - m_new) and idx(s - m_new) is always idx(0) = lut[0] = 1.0. One
+  subtractor d = s - m_base gives the new max (its sign), the single
+  non-trivial index (|d|, computed as s - m or m - s in parallel and
+  selected by the sign) and which of w, r receives it. This replaces a
+  comparator, a mux and a second subtractor in series, and halves the ROM.
+- Index math: min(round(min(|d|, 16384) / 16), 1023) is 1023 for
+  |d| >= 16360, else (|d| >> 4) + |d|[3]. The FORMAL block proves both
+  index forms equal the 3.5 definition for every input.
+- l update: when r = 1.0 the rescale is exact (rshr(l * 2^15, 15) = l), so
+  that branch skips the multiplier; otherwise rshr(l * r, 15) + 2^15 is
+  computed as (l * r + 2^14 + 2^30) >> 15, one adder after the multiplier.
+- PIPE_ROM = 1 registers the single lookup in rtl/exp_lut_1p.sv (FPGA:
+  fpga/exp_lut_1p_xilinx.sv, an XPM single-port ROM, one RAMB18 per lane).
+
+attention_top (rtl/attention_top.sv):
+- Memories: Q, K, V and out are instances of rtl/sync_ram.sv (one byte-
+  enabled write port, one registered read port, the standard BRAM
+  inference template). The out RAM registers the whole row and the byte is
+  selected after it with the registered column, so rd_data is still valid
+  one cycle after rd_addr. On an FPGA, Q and K map to RAMB18 and V and out
+  to distributed RAM (scripts/fpga_resources.sh). For sky130 STA
+  (make sta-top), scripts/sync_ram_sta_stub.sv stands in for each SRAM
+  macro: flops at every macro pin, macro access time not modeled.
+- Score register: s is prefetched. Each cycle converts the element the
+  next cycle drains (index from t + 1, or element 0 of drain_buf_next on
+  the capture cycle) into a flop, so online_softmax sees s from a register.
+- PV datapath: two stages. Stage A, the out_valid cycle, forms
+  acc_base * r as three partial products (r[5:0], r[11:6], r[15:12]) and
+  w * v[k], and registers them; stage B forms the single sum
+  (lo + mid * 2^6 + hi * 2^12 + w*v * 2^15 + 2^14) >>> 15, which equals
+  rshr(acc * r, 15) + w * v exactly, and writes the lane's accumulator.
+  A lane's next element arrives four cycles later, so stage A never reads
+  an accumulator stage B still owes. Lane 0's last element of a group is
+  drained at S_DRAIN_LAST t = 12 and written at the edge after
+  t = 14 + PIPE_ROM <= 15; the divider samples row 0 in the first S_DIVIDE
+  cycle, so the schedule and the cycle formula are unchanged.
+- Lane select: the lane whose out_valid is high is the lane drained
+  1 + PIPE_ROM cycles earlier. Each PV column keeps its own copy of that
+  delay line (and of the row-start flag), and each divider column its own
+  copy of row, so no single flop fans out to hundreds of mux selects. The
+  copies are marked keep (and the netlist flow sets keep on their flops)
+  so synthesis does not merge them back. The FORMAL block asserts every
+  copy equals the original (lane_out_valid, row) on every cycle.

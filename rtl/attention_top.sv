@@ -27,42 +27,29 @@
 // 16-wide bank of serial restoring dividers (docs/uarch.md 3.8) once per
 // row, 4 rows sequential, 35 cycles each (1 load + 33 iterate + 1 write).
 //
-// Internal storage (docs/uarch.md 8.3): Q/K/V/out are Block-RAM-inferable
-// synchronous memories (single write port, single synchronous registered
-// read port per memory), NOT register arrays (the register-array version
-// synthesized to roughly 32k flip-flops; this version keeps 4 $mem cells
-// through generic synth). Q and K are stored column-major, word-packed 4
-// ACT bytes/word (exactly the 4 lanes one matmul_tile cycle needs), so a
-// single synchronous read per cycle delivers q_flat/k_flat directly; the
-// read address is PREFETCHED one cycle early using the FSM's own next-state
-// value (rg_n/kb_n/t_n), so the registered RAM output lands exactly the
-// cycle it is consumed -- no added latency, cycle_count formula unchanged.
-// V is stored row-major, 16 ACT bytes/word (one V row = one word); its read
-// address (drain_v_row) is presented on the in_valid cycle, so the RAM's
-// own 1-cycle synchronous read latency naturally lands the row on the
-// out_valid cycle, replacing the old per-lane vrow_pipe address register
-// entirely. out_mem is written a full row (128 bits) at a time by the
-// divider bank and read back byte-granular through a registered port. None
-// of the four RAM arrays carry a reset term (a reset on RAM contents blocks
-// BRAM inference): correctness instead relies on the load-before-use
-// protocol (the FSM never reads a location not written for the current
-// n_len, and every testbench loads all inputs before pulsing start).
+// Storage: Q, K, V and out are rtl/sync_ram.sv instances (one byte-enabled
+// write port, one registered read port: block RAM on an FPGA, SRAM macros
+// in an ASIC). Q and K are column-major, 4 ACT bytes per word, so one read
+// per cycle is exactly q_flat / k_flat; the read address is prefetched from
+// the FSM's next-state values (rg_n / kb_n / t_n) so the registered output
+// lands the cycle it is used. V is one 16-byte row per word, addressed on
+// the in_valid cycle so the row arrives on the out_valid cycle. RAM contents
+// are not reset (that blocks BRAM inference); the FSM never reads a location
+// not written for the current n_len.
 //
-// mac_unit, matmul_tile, online_softmax are instantiated verbatim (their own
-// verified control/format contracts, docs/uarch.md 8.1/8.2); NOT modified.
+// Timing structure (docs/uarch.md 8.4): the softmax score is prefetched into
+// a register, the PV datapath is two pipeline stages, and the lane / row
+// selects are replicated per column. None of it changes the cycle formula.
 //
-// Parameter PIPE_ROM (2026-09-19, docs/uarch.md 8.3 "PIPE_ROM plumbing"):
-// forwarded to the four online_softmax lanes. 0 (default) is the normative
-// latency-1 configuration, bit-identical to the pre-parameter module. 1
-// selects the registered-ROM lanes (out_valid two cycles after in_valid),
-// which this module absorbs with one extra stage on the two signals that
-// travel from the in_valid cycle to the out_valid cycle (row_start and the
-// V row); the FSM, the drain schedule and the cycle formula are unchanged
-// because no FSM transition depends on out_valid, and the last element's
-// PV update lands one S_DIVIDE cycle later than the divider first needs
-// its (different) row. Used by the FPGA build (fpga/attn_uart_top.sv).
+// Parameters:
+//   PIPE_ROM: forwarded to the four online_softmax lanes. 1 = registered-ROM
+//     lanes (out_valid two cycles after in_valid); this module absorbs the
+//     extra cycle (one more V-row stage and a longer select delay line).
+//   PV_SPLIT: 1 = PV rescale multiply as three partial products (standard-
+//     cell timing); 0 = one product, for DSP48 slices (fpga/attn_uart_top.sv).
 module attention_top #(
-    parameter bit PIPE_ROM = 1'b0
+    parameter bit PIPE_ROM = 1'b0,
+    parameter bit PV_SPLIT = 1'b1  // 1: split PV multiply (ASIC timing); 0: one product (FPGA)
 ) (
     input  logic        clk,
     input  logic        rst,        // synchronous, active-high
@@ -199,6 +186,9 @@ module attention_top #(
   logic       row_start_val;
   always_comb row_start_val = drain_en && (key_local == 2'd0) && (drain_blk == 4'd0);
 
+  // Block boundary: the finished block is captured into drain_buf.
+  wire capture = (state == S_COMPUTE) && (t == 4'd15);
+
   // ---------------------------------------------------------------------
   // Internal storage (docs/uarch.md 8.3): Block-RAM-inferable synchronous
   // memories, one write port + one synchronous read port per memory, NOT
@@ -206,25 +196,14 @@ module attention_top #(
   // rationale. Memory CONTENTS carry no reset (load-before-use protocol).
   // ---------------------------------------------------------------------
 
-  // Q, K: column-major, word-packed 4 ACT bytes/word. Word address
-  // {group[3:0], col[3:0]} (group = rg for Q, kb for K); one word IS
-  // q_flat/k_flat (the little-endian packing of docs/uarch.md 8.1 matches
-  // exactly: lane i lives in bits [8*i+:8]). Byte-granular writes from the
-  // shared load port land in one of the 4 lanes of a word (byte_lane =
-  // row[1:0], the row's position within its group of 4).
-  logic [31:0] q_word_mem [256];
-  logic [31:0] k_word_mem [256];
-
-  // V: row-major, 16 ACT bytes/word (one V row = one word), matching the
-  // drain path's whole-row access. out_mem: row-major, 16 ACT bytes/word,
-  // written whole (one divider-bank row completion) and read byte-granular.
-  logic [127:0] v_mem   [64];
-  logic [127:0] out_mem [64];
-
+  // Q, K: column-major, 4 ACT bytes per word, word address {group, col}
+  // (group = rg for Q, kb for K). One word is exactly q_flat / k_flat (lane
+  // i in bits [8*i+:8], uarch 8.1). A load-port write lands in byte lane
+  // row[1:0], the row's position within its group of 4.
+  // V: row-major, one 16-byte V row per word. out: row-major, written a
+  // whole row at a time by the divider bank, read back one byte at a time.
   wire [5:0] wr_row = addr[9:4];
   wire [3:0] wr_col = addr[3:0];
-  // Q/K share this word address / byte-lane split: word = {group, col},
-  // byte_lane = the row's position (0..3) within its group of 4.
   wire [7:0] qk_waddr     = {addr[9:6], addr[3:0]};
   wire [1:0] qk_byte_lane = addr[5:4];
 
@@ -232,36 +211,45 @@ module attention_top #(
   wire we_k = we && (sel == 2'd1);
   wire we_v = we && (sel == 2'd2);
 
-  wire [7:0] q_raddr = {rg_n, t_n};
-  wire [7:0] k_raddr = {kb_n, t_n};
-
   logic [31:0] q_flat;
   logic [31:0] k_flat;
 
-  always_ff @(posedge clk) begin
-    if (we_q) q_word_mem[qk_waddr][8*qk_byte_lane+:8] <= wdata;
-    if (rst) q_flat <= '0;
-    else q_flat <= q_word_mem[q_raddr];
-  end
+  sync_ram #(.AW(8), .DW(32)) u_qmem (
+      .clk  (clk),
+      .rst  (rst),
+      .we   (we_q),
+      .be   (4'b0001 << qk_byte_lane),
+      .waddr(qk_waddr),
+      .wdata({4{wdata}}),
+      .raddr({rg_n, t_n}),
+      .rdata(q_flat)
+  );
 
-  always_ff @(posedge clk) begin
-    if (we_k) k_word_mem[qk_waddr][8*qk_byte_lane+:8] <= wdata;
-    if (rst) k_flat <= '0;
-    else k_flat <= k_word_mem[k_raddr];
-  end
+  sync_ram #(.AW(8), .DW(32)) u_kmem (
+      .clk  (clk),
+      .rst  (rst),
+      .we   (we_k),
+      .be   (4'b0001 << qk_byte_lane),
+      .waddr(qk_waddr),
+      .wdata({4{wdata}}),
+      .raddr({kb_n, t_n}),
+      .rdata(k_flat)
+  );
 
-  // V read address is drain_v_row, the SAME combinational signal that
-  // gates online_softmax's in_valid this cycle; the RAM's own 1-cycle
-  // synchronous read latency lands the row data on the out_valid cycle one
-  // cycle later, exactly the alignment the old vrow_pipe register used to
-  // provide by hand (docs/uarch.md 8.3).
+  // The V read address is drain_v_row, presented on the in_valid cycle, so
+  // the RAM's 1-cycle read latency lands the row on the out_valid cycle.
   logic [127:0] v_row_reg;
 
-  always_ff @(posedge clk) begin
-    if (we_v) v_mem[wr_row][8*wr_col+:8] <= wdata;
-    if (rst) v_row_reg <= '0;
-    else v_row_reg <= v_mem[drain_v_row];
-  end
+  sync_ram #(.AW(6), .DW(128)) u_vmem (
+      .clk  (clk),
+      .rst  (rst),
+      .we   (we_v),
+      .be   (16'h0001 << wr_col),
+      .waddr(wr_row),
+      .wdata({16{wdata}}),
+      .raddr(drain_v_row),
+      .rdata(v_row_reg)
+  );
 
   // PIPE_ROM = 1: one more stage so the V row still lands on the (now two
   // cycles later) out_valid cycle. Elements enter at most one per cycle
@@ -279,20 +267,35 @@ module attention_top #(
     assign v_row_pv = v_row_reg;
   end
 
-  // out_mem: written whole (16 bytes) on out_we; read back byte-granular,
-  // registered one cycle after rd_addr (out_we/out_wr_row/out_wr_data are
-  // driven by the divider bank, declared further below; forward reference
-  // to module-scope signals is standard SystemVerilog elaboration order).
+  // out: written a whole row on out_we (driven by the divider bank further
+  // below). Read: the RAM registers the addressed row, and the byte is
+  // selected after it with the registered column, so rd_data is valid one
+  // cycle after rd_addr exactly as before.
   logic [127:0] out_word_pack;
   for (genvar gp = 0; gp < 16; gp++) begin : g_out_pack
     assign out_word_pack[8*gp+:8] = out_wr_data[gp];
   end
 
+  logic [127:0] out_rd_word;
+  logic [  3:0] rd_col_q;
+
+  sync_ram #(.AW(6), .DW(128)) u_outmem (
+      .clk  (clk),
+      .rst  (rst),
+      .we   (out_we),
+      .be   ('1),
+      .waddr(out_wr_row),
+      .wdata(out_word_pack),
+      .raddr(rd_addr[9:4]),
+      .rdata(out_rd_word)
+  );
+
   always_ff @(posedge clk) begin
-    if (out_we) out_mem[out_wr_row] <= out_word_pack;
-    if (rst) rd_data <= '0;
-    else rd_data <= out_mem[rd_addr[9:4]][8*rd_addr[3:0]+:8];
+    if (rst) rd_col_q <= '0;
+    else rd_col_q <= rd_addr[3:0];
   end
+
+  assign rd_data = out_rd_word[8*rd_col_q+:8];
 
   // ---------------------------------------------------------------------
   // matmul_tile feed (S_COMPUTE only). q_flat/k_flat are now the Q/K RAMs'
@@ -343,25 +346,41 @@ module attention_top #(
 
   always_ff @(posedge clk) begin
     if (rst) drain_buf <= '0;
-    else if ((state == S_COMPUTE) && (t == 4'd15)) drain_buf <= drain_buf_next;
+    else if (capture) drain_buf <= drain_buf_next;
   end
 
-  // Score conversion (rounding site 1, uarch.md 3.3): one element per
-  // cycle, whichever (lane, key_local) is addressed this cycle.
-  // acc_flat[24*(4*i+j)+:24], i=lane, j=key_local -> index = 4*lane+key_local
-  wire [3:0] drain_elem_idx = {lane, key_local};
-  wire signed [23:0] drain_sacc = drain_buf[24*drain_elem_idx+:24];
+  // Score conversion (rounding site 1, uarch.md 3.3), one element per
+  // cycle: s = sat16((sacc + 8) >>> 4) for element (lane, key_local), at
+  // drain_buf index 4*lane + key_local. It is PREFETCHED: each cycle
+  // converts the element the NEXT cycle drains into a register, so
+  // online_softmax gets s straight from a flop. In every cycle that is
+  // followed by a drain cycle (S_COMPUTE or S_DRAIN_LAST) the next t is
+  // t + 1 mod 16, so the index uses t + 1 rather than the FSM's t_n (in
+  // other cycles the prefetched value is never consumed). On the capture
+  // cycle (S_COMPUTE, t == 15) the next element is index 0 of the block
+  // being captured, read from drain_buf_next. Every other cycle drain_buf
+  // does not change, so the prefetched value equals what a direct read
+  // would give; latency and the cycle formula are unchanged.
+  wire [3:0]         t_inc     = t + 4'd1;
+  wire [3:0]         elem_n    = {t_inc[1:0], t_inc[3:2]};
+  wire signed [23:0] sacc_n    = capture ? drain_buf_next[23:0] : drain_buf[24*elem_n+:24];
 
   logic signed [24:0] s_wide;
   logic signed [24:0] s_shift;
+  logic signed [15:0] s_conv_n;
   logic signed [15:0] s_conv;
 
   always_comb begin
-    s_wide  = 25'(signed'(drain_sacc)) + 25'sd8;
+    s_wide  = 25'(sacc_n) + 25'sd8;
     s_shift = s_wide >>> 4;
-    if (s_shift > 25'sd32767) s_conv = 16'sd32767;
-    else if (s_shift < -25'sd32768) s_conv = -16'sd32768;
-    else s_conv = s_shift[15:0];
+    if (s_shift > 25'sd32767) s_conv_n = 16'sd32767;
+    else if (s_shift < -25'sd32768) s_conv_n = -16'sd32768;
+    else s_conv_n = s_shift[15:0];
+  end
+
+  always_ff @(posedge clk) begin
+    if (rst) s_conv <= '0;
+    else s_conv <= s_conv_n;
   end
 
   // ---------------------------------------------------------------------
@@ -371,7 +390,11 @@ module attention_top #(
   logic        lane_row_start [4];
   logic [15:0] lane_w  [4];
   logic [15:0] lane_r  [4];
+  // verilator lint_off UNUSEDSIGNAL
+  // lane_out_valid is read only by the FORMAL block: the PV datapath uses
+  // its own per-column copy of the same delay line (g_pv below).
   logic        lane_out_valid [4];
+  // verilator lint_on UNUSEDSIGNAL
   logic [23:0] lane_l  [4];
   // verilator lint_off UNUSEDSIGNAL
   // online_softmax's m is "continuously visible (debug and formal)" per its
@@ -403,37 +426,6 @@ module attention_top #(
     );
   end
 
-  // Pipeline: carry row_start from the in_valid cycle to the out_valid cycle
-  // (1 + PIPE_ROM cycles later), mirroring online_softmax's own
-  // row_start -> l_base alignment (uarch.md 8.3). A per-cycle shift of the
-  // qualified pulse (lane_in_valid & lane_row_start) is exact because a lane
-  // accepts at most one element per 4 cycles, so no two of its elements are
-  // ever in flight; row_start_d[L] is 1 on exactly the out_valid cycle of
-  // the lane's row-first element. (Before 2026-09-19 this was a hold
-  // register updated on in_valid; the values at every out_valid cycle are
-  // identical for PIPE_ROM = 0.) The V row needs no separate address
-  // register: the V RAM's own synchronous read latency provides that
-  // alignment (memory section above).
-  logic [3:0]  row_start_d;  // packed: driven per bit by continuous assigns below
-
-  for (genvar gP = 0; gP < 4; gP++) begin : g_pipe
-    logic rs_s1;
-    always_ff @(posedge clk) begin
-      if (rst) rs_s1 <= 1'b0;
-      else rs_s1 <= lane_in_valid[gP] && lane_row_start[gP];
-    end
-    if (PIPE_ROM) begin : g_rs_lat2
-      logic rs_s2;
-      always_ff @(posedge clk) begin
-        if (rst) rs_s2 <= 1'b0;
-        else rs_s2 <= rs_s1;
-      end
-      assign row_start_d[gP] = rs_s2;
-    end else begin : g_rs_lat1
-      assign row_start_d[gP] = rs_s1;
-    end
-  end
-
   // ---------------------------------------------------------------------
   // NUM accumulators (rounding site 4, uarch.md 3.7/6.1): 4 lanes x 16 k of
   // STATE, updated through ONE shared 16-wide PV datapath (uarch.md 8.3:
@@ -451,70 +443,150 @@ module attention_top #(
   // ---------------------------------------------------------------------
   logic signed [31:0] acc_num [4][16];
 
-  logic        pv_valid;      // some lane's out_valid is high this cycle
-  logic [1:0]  pv_lane;       // which lane (round-robin: at most one)
-  logic        pv_row_start;  // that lane's pipelined row_start
-  logic [15:0] pv_w;          // that lane's registered w, r
-  logic [15:0] pv_r;
-
-  always_comb begin
-    pv_valid     = 1'b0;
-    pv_lane      = 2'd0;
-    pv_row_start = 1'b0;
-    pv_w         = '0;
-    pv_r         = '0;
-    // Priority order is defensive only: the drain protocol makes
-    // lane_out_valid one-hot-or-zero (asserted in the FORMAL block).
-    for (int li = 0; li < 4; li++) begin
-      if (lane_out_valid[li]) begin
-        pv_valid     = 1'b1;
-        pv_lane      = li[1:0];
-        pv_row_start = row_start_d[li];
-        pv_w         = lane_w[li];
-        pv_r         = lane_r[li];
-      end
-    end
-  end
-
-  // The one shared 16-wide PV datapath: per column k,
+  // The one shared 16-wide PV datapath, two pipeline stages. Per column k:
   //   acc_next = rshr(acc_base * r, 15) + w * v[k]
-  logic signed [31:0] pv_next [16];
+  // Stage A (the out_valid cycle) forms both products and registers them;
+  // stage B adds and writes the lane's accumulator one cycle later. This is
+  // safe because a lane's next element arrives 4 cycles after the previous
+  // one (round-robin drain), so stage A never reads an accumulator stage B
+  // still owes a write to. The last update of a group (lane 0's final
+  // element) still lands before S_DIVIDE reads acc_num[0]: drained at
+  // DRAIN_LAST t = 12, out_valid at t = 13 + PIPE_ROM, written at the edge
+  // after t = 14 + PIPE_ROM <= 15, and the divider samples row 0 in the
+  // first S_DIVIDE cycle (t = 16). The cycle formula is unchanged.
+  //
+  // Lane select: the lane whose out_valid is high is the lane that was
+  // drained 1 + PIPE_ROM cycles earlier, so each column keeps its OWN copy
+  // of that delay line (lane_in_valid and the row-start flag, shifted
+  // 1 + PIPE_ROM times) instead of all 16 columns decoding the four
+  // lane_out_valid flops. Same values (the FORMAL block asserts the copy
+  // equals lane_out_valid), but each select flop drives one column, not 551
+  // pins, and the stage-B lane register is per column too.
+  localparam int PvLat = 1 + int'(PIPE_ROM);
 
+  // acc_base * r in stage A:
+  //   PV_SPLIT = 1 (ASIC, default): three partial products acc * r[5:0],
+  //     acc * r[11:6], acc * r[15:12], each a shallow multiplier; stage B
+  //     adds them (acc * r = lo + (mid << 6) + (hi << 12), exact).
+  //   PV_SPLIT = 0 (FPGA): one product, which maps onto two DSP48 slices
+  //     (splitting would triple the DSP count past what a Basys 3 has).
+  // Only the low 47 bits of the product reach the 32-bit result.
   for (genvar gK = 0; gK < 16; gK++) begin : g_pv
-    logic signed [31:0] acc_base;
-    logic signed [48:0] ar_full;
-    logic signed [48:0] ar_rnd;
-    logic signed [23:0] wv_prod;
+    // Delay lines, newest entry in the low bits: the top nibble / top bit is
+    // the element whose out_valid is high this cycle. keep: the 16 copies
+    // are identical on purpose (fanout), so synthesis must not merge them.
+    (* keep *) logic [4*PvLat-1:0] lsel_d;  // one-hot lane in flight
+    (* keep *) logic [  PvLat-1:0] rs_d;  // ... and whether it is its row's first element
+    logic [3:0] lsel;  // stage A select
+    logic       rs;
+    (* keep *) logic [3:0] lselb;  // stage B select (lsel one cycle later)
 
-    // rshr(acc_base * r, 15): 48-bit signed product (3.7/6.1), round-
-    // half-up bias then arithmetic shift; only the low 32 bits of the
-    // shifted value are kept (32'() cast), matching online_softmax's own
-    // l_resc truncation style (8.2) and trusted by the same 3.7 bound.
-    always_comb begin
-      acc_base   = pv_row_start ? 32'sd0 : acc_num[pv_lane][gK];
-      ar_full    = 49'(signed'(acc_base) * signed'({1'b0, pv_r}));
-      ar_rnd     = ar_full + 49'sd16384;
-      wv_prod    = 24'(signed'({1'b0, pv_w}) * signed'(v_row_pv[8*gK+:8]));
-      pv_next[gK] = 32'(ar_rnd >>> 15) + 32'(wv_prod);
-    end
-  end
-
-  // State: the selected lane's bank takes pv_next; every other bank holds.
-  for (genvar gL2 = 0; gL2 < 4; gL2++) begin : g_num_lane
-    for (genvar gK2 = 0; gK2 < 16; gK2++) begin : g_num_k
-      always_ff @(posedge clk) begin
-        if (rst) acc_num[gL2][gK2] <= '0;
-        else if (pv_valid && (pv_lane == gL2[1:0])) acc_num[gL2][gK2] <= pv_next[gK2];
+    always_ff @(posedge clk) begin
+      if (rst) begin
+        lsel_d <= '0;
+        rs_d   <= '0;
+        lselb  <= '0;
+      end else begin
+        lsel_d <= (4 * PvLat)'({lsel_d, lane_in_valid[3], lane_in_valid[2],
+                                lane_in_valid[1], lane_in_valid[0]});
+        rs_d   <= PvLat'({rs_d, row_start_val});
+        lselb  <= lsel;
       end
     end
+
+    logic signed [31:0] acc_sel;
+    logic        [15:0] w_sel, r_sel;
+    logic signed [31:0] acc_base;
+    logic signed [23:0] wv_prod;
+    logic signed [23:0] pva_wv;  // w * v[k], registered
+    logic signed [46:0] ar_q;  // the registered product terms, summed (stage B)
+    logic signed [46:0] ar_rnd;
+
+    always_comb begin
+      lsel    = lsel_d[4*PvLat-1-:4];
+      rs      = rs_d[PvLat-1];
+      acc_sel = '0;
+      w_sel   = '0;
+      r_sel   = '0;
+      for (int i = 0; i < 4; i++) begin  // one-hot AND-OR mux
+        if (lsel[i]) begin
+          acc_sel = acc_sel | acc_num[i][gK];
+          w_sel   = w_sel | lane_w[i];
+          r_sel   = r_sel | lane_r[i];
+        end
+      end
+      acc_base = rs ? 32'sd0 : acc_sel;
+      wv_prod  = 24'(signed'({1'b0, w_sel}) * signed'(v_row_pv[8*gK+:8]));
+      // One multi-operand sum: (acc*r + 2^14 + w*v * 2^15) >>> 15 equals
+      // rshr(acc*r, 15) + w*v exactly (w*v * 2^15 is a multiple of 2^15).
+      ar_rnd   = ar_q + (47'(pva_wv) <<< 15) + 47'sd16384;
+    end
+
+    always_ff @(posedge clk) begin
+      if (rst) pva_wv <= '0;
+      else if (|lsel) pva_wv <= wv_prod;
+    end
+
+    if (PV_SPLIT) begin : g_split
+      logic signed [38:0] pva_lo;  // acc_base * r[5:0]
+      logic signed [38:0] pva_mid;  // acc_base * r[11:6]
+      logic signed [36:0] pva_hi;  // acc_base * r[15:12]
+      always_ff @(posedge clk) begin
+        if (rst) begin
+          pva_lo  <= '0;
+          pva_mid <= '0;
+          pva_hi  <= '0;
+        end else if (|lsel) begin
+          pva_lo  <= 39'(signed'(acc_base) * signed'({1'b0, r_sel[5:0]}));
+          pva_mid <= 39'(signed'(acc_base) * signed'({1'b0, r_sel[11:6]}));
+          pva_hi  <= 37'(signed'(acc_base) * signed'({1'b0, r_sel[15:12]}));
+        end
+      end
+      assign ar_q = 47'(pva_lo) + (47'(pva_mid) <<< 6) + (47'(pva_hi) <<< 12);
+    end else begin : g_whole
+      logic signed [46:0] pva_ar;  // acc_base * r
+      always_ff @(posedge clk) begin
+        if (rst) pva_ar <= '0;
+        else if (|lsel) pva_ar <= 47'(signed'(acc_base) * signed'({1'b0, r_sel}));
+      end
+      assign ar_q = pva_ar;
+    end
+
+    // Stage B: the selected lane's accumulator takes the sum.
+    for (genvar gL2 = 0; gL2 < 4; gL2++) begin : g_num_lane
+      always_ff @(posedge clk) begin
+        if (rst) acc_num[gL2][gK] <= '0;
+        else if (lselb[gL2]) acc_num[gL2][gK] <= 32'(ar_rnd >>> 15);
+      end
+    end
+
+`ifdef FORMAL
+    // The local select copy is exactly lane_out_valid (checked from the
+    // first post-reset cycle on).
+    logic f_pv_init;
+    initial f_pv_init = 1'b0;
+    always_ff @(posedge clk) f_pv_init <= 1'b1;
+    always_comb begin
+      if (f_pv_init)
+        assert (lsel == {lane_out_valid[3], lane_out_valid[2],
+                         lane_out_valid[1], lane_out_valid[0]});
+    end
+`endif
   end
 
   // ---------------------------------------------------------------------
   // Divider bank (uarch.md 3.8, rounding site 5): 16-wide, shared control
-  // (div_cnt, row), one instance per k. B (= 2*den) is shared per row.
+  // (div_cnt, row), one instance per k. B (= 2*den) is the same for every
+  // column of a row; each column selects it with its own copy of row (see
+  // row_c below) so the row register does not fan out to every operand mux.
   // ---------------------------------------------------------------------
-  wire [23:0] div_den = lane_l[row];
-  wire [24:0] div_b   = {div_den, 1'b0};  // B = 2*den, 25-bit unsigned
+  logic [1:0] row_n;  // next row (the FSM register and the per-column copies)
+
+  always_comb begin
+    row_n = row;
+    if (state == S_DRAIN_LAST && t == 4'd15) row_n = 2'd0;
+    else if (state == S_DIVIDE && div_cnt == 6'd34 && row != 2'd3) row_n = row + 2'd1;
+  end
 
   wire [5:0] out_wr_row = {rg, row};
   logic        out_we;
@@ -522,6 +594,27 @@ module attention_top #(
   assign out_we = (state == S_DIVIDE) && (div_cnt == 6'd34);
 
   for (genvar gD = 0; gD < 16; gD++) begin : g_div
+    (* keep *) logic [1:0] row_c;  // this column's copy of row (identical by construction)
+    logic        [23:0] div_den;
+    logic        [24:0] div_b;  // B = 2*den, 25-bit unsigned
+
+    always_ff @(posedge clk) begin
+      if (rst) row_c <= '0;
+      else row_c <= row_n;
+    end
+
+    always_comb begin
+      div_den = lane_l[row_c];
+      div_b   = {div_den, 1'b0};
+    end
+
+`ifdef FORMAL
+    logic f_div_init;
+    initial f_div_init = 1'b0;
+    always_ff @(posedge clk) f_div_init <= 1'b1;
+    always_comb if (f_div_init) assert (row_c == row);
+`endif
+
     logic signed [33:0] a_val;      // A = 2*num + den, 34-bit signed
     // verilator lint_off UNUSEDSIGNAL
     // abs_a_full[33] and rem_trial[25] are provably always 0 by the 3.8
@@ -554,7 +647,7 @@ module attention_top #(
     logic signed [7:0]  out_raw;
 
     always_comb begin
-      a_val      = (34'(signed'(acc_num[row][gD])) <<< 1) + 34'(signed'({1'b0, div_den}));
+      a_val      = (34'(signed'(acc_num[row_c][gD])) <<< 1) + 34'(signed'({1'b0, div_den}));
       abs_a_full = a_val[33] ? (-a_val) : a_val;
       abs_a_val  = abs_a_full[32:0];
       sign_a_val = a_val[33];
@@ -651,9 +744,10 @@ module attention_top #(
       // logic the original per-state case arms implemented (see the
       // comment on the rg_n/kb_n/t_n block); this is also what makes the
       // Q/K RAM read address a valid one-cycle-early prefetch.
-      rg <= rg_n;
-      kb <= kb_n;
-      t  <= t_n;
+      rg  <= rg_n;
+      kb  <= kb_n;
+      t   <= t_n;
+      row <= row_n;
 
       unique case (state)
         S_IDLE: begin
@@ -663,10 +757,7 @@ module attention_top #(
         S_COMPUTE: ;
 
         S_DRAIN_LAST: begin
-          if (t == 4'd15) begin
-            row     <= '0;
-            div_cnt <= '0;
-          end
+          if (t == 4'd15) div_cnt <= '0;
         end
 
         S_DIVIDE: begin
@@ -675,7 +766,6 @@ module attention_top #(
               if (rg == nblk_m1) done <= 1'b1;
               // else: rg/kb/t already advanced above via rg_n/kb_n/t_n.
             end else begin
-              row     <= row + 2'd1;
               div_cnt <= '0;
             end
           end else begin

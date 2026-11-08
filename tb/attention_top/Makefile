@@ -25,7 +25,8 @@ PWD := $(shell pwd)
 VERILOG_SOURCES = $(PWD)/coverage.vlt \
                    $(PWD)/../../rtl/mac_unit.sv \
                    $(PWD)/../../rtl/matmul_tile.sv \
-                   $(PWD)/../../rtl/exp_lut_2p.sv \
+                   $(PWD)/../../rtl/exp_lut_1p.sv \
+                   $(PWD)/../../rtl/sync_ram.sv \
                    $(PWD)/../../rtl/online_softmax.sv \
                    $(PWD)/../../rtl/attention_top.sv
 
@@ -36,8 +37,18 @@ COCOTB_TEST_MODULES = test_attention_top
 # online_softmax lanes and absorbs the extra cycle internally, so the SAME
 # test module (same golden compare, same cycle formula) must pass in both
 # elaborations. Artifact-isolated exactly like tb/online_softmax.
+#
+# PV_SPLIT knob: 0 elaborates the single-product PV datapath the FPGA build
+# uses (fpga/attn_uart_top.sv, with PIPE_ROM=1). Same test module, same
+# golden compare; its own build dir, results and coverage file.
 PIPE_ROM ?= 0
-ifeq ($(PIPE_ROM),1)
+PV_SPLIT ?= 1
+ifeq ($(PV_SPLIT),0)
+SIM_BUILD := sim_build_pvsplit0_p$(PIPE_ROM)
+COCOTB_RESULTS_FILE := results_pvsplit0_p$(PIPE_ROM).xml
+EXTRA_ARGS += -GPV_SPLIT=0 -GPIPE_ROM=$(PIPE_ROM)
+COCOTB_PLUSARGS += +verilator+coverage+file+coverage_pvsplit0_p$(PIPE_ROM).dat
+else ifeq ($(PIPE_ROM),1)
 SIM_BUILD ?= sim_build_pipe_rom1
 COCOTB_RESULTS_FILE ?= results_pipe_rom1.xml
 EXTRA_ARGS += -GPIPE_ROM=1

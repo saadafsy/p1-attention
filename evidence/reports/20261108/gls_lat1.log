@@ -1,0 +1,5 @@
+WARNING: gls_tb.v:79: $readmemh(/home/saad/p1-attention/build/gls_stim.hex): Not enough words in the file for the requested range [0:8191].
+WARNING: gls_tb.v:80: $readmemh(/home/saad/p1-attention/build/gls_expected_lat1.hex): Not enough words in the file for the requested range [0:8191].
+VCD info: dumpfile /home/saad/p1-attention/build/gls_lat1.vcd opened for output.
+GLS PASS: 546 cycles checked, 0 errors
+gls_tb.v:134: $finish called at 5486000 (1ps)

@@ -1,6 +1,6 @@
 # Inner mac_unit assertions are stripped below (chformal -assert -remove
 # mac_unit) because that contract is already proven standalone: see
-# formal/mac_unit.sby (PASS, auditor-countersigned, EVIDENCE.md mac_unit
+# formal/mac_unit.sby (PASS, independently re-run, EVIDENCE.md mac_unit
 # rows). Re-proving 16 replicated copies of the identical mac_unit contract
 # inside this tile-level BMC is redundant solver load with no additional
 # coverage (docs/design_rules.md "formal is a subset / do not fight the tool"): the

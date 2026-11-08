@@ -63,7 +63,7 @@ class PipeCoverageModel:
     deliberately separate from test_softmax_coverage.py's CoverageModel:
     that 52-bin model (score/diff_w/idx/rescale/l_value/row_length/control/
     cross) already covers every VALUE-domain corner at either latency, is
-    gated by the default (PIPE_ROM=0) run, and per the task brief must not
+    gated by the default (PIPE_ROM=0) run, and by design must not
     be inflated or otherwise perturbed by this file. The bins below probe
     only latency-2-specific STRUCTURAL corners (pipeline-stage interaction),
     dumped to a separate report file so the default run's func_coverage.txt

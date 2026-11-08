@@ -366,7 +366,7 @@ async def cov_step(dut, mirror, tracker, in_valid, row_start, s, msg):
 # ============================================================================
 @cocotb.test()
 async def directed_den_worst_case(dut):
-    """The audit finding this session must close: no existing test approaches
+    """The review finding this test closes: no existing test approaches
     the DEN worst case (l reaches only ~2^21 with row length <= 64). A
     256-element row of IDENTICAL scores never moves the running max after
     element 0 (uarch.md 6.1 identity 1: r == 0x8000 exact identity), so every

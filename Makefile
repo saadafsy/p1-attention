@@ -81,18 +81,38 @@ PERIOD_NS ?= 10
 check-lib:
 	@test -f "$(LIB)" || { echo "LIB=$(LIB) not found; set LIB=<path to sky130_fd_sc_hd__tt_025C_1v80.lib>"; exit 1; }
 
-synth-netlist: check-lib
+# Mapping is timing-driven: Booth multipliers (synth -booth) and ABC with a
+# delay target plus buffering and gate sizing (scripts/abc_timing.abc,
+# with {D} filled in from PERIOD_NS). The earlier flow mapped area-only
+# with minimum-size cells and no buffers, so unbuffered fanout alone cost
+# several ns per path, and hundreds at the top level (2026-11-08).
+# NETLIST_SRC lets sta-top swap the SRAM stand-in in for rtl/sync_ram.sv;
+# CHPARAM sets parameters before elaboration. Registers declared (* keep *)
+# (deliberate duplicates for fanout) get keep on their flops, not just the
+# wire, so opt_merge does not fold them back into one.
+# Generic synthesis with Booth multipliers, flattened (so ABC sees whole
+# nets for buffering), adders as Kogge-Stone parallel-prefix instead of the
+# default ripple carry.
+SYNTH_FAST = synth -booth -flatten -top $(1) -run :fine; techmap -map +/techmap.v -map +/choices/kogge-stone.v; synth -booth -flatten -top $(1) -run fine:;
+ABC_PS      = $(shell awk 'BEGIN{printf "%d", $(PERIOD_NS)*1000}')
+ABC_SCRIPT  = build/abc_timing_$(ABC_PS).abc
+ABC_MAP     = abc -D $(ABC_PS) -script $(ABC_SCRIPT) -liberty $(LIB)
+NETLIST_SRC ?= $(SRC)
+CHPARAM     ?=
+$(ABC_SCRIPT): scripts/abc_timing.abc
 	@mkdir -p build
-	yosys -p 'read_verilog -sv $(SRC); hierarchy -top $(MODULE); synth -top $(MODULE); dfflibmap -liberty $(LIB); abc -liberty $(LIB); opt_clean; stat -liberty $(LIB); write_verilog -noattr build/$(MODULE)_netlist.v' 2>&1 | tee build/synth_netlist_$(MODULE).log
+	sed 's/{D}/$(ABC_PS)/g' $< > $@
+
+synth-netlist: check-lib $(ABC_SCRIPT)
+	@mkdir -p build
+	yosys -p 'read_verilog -sv -defer $(NETLIST_SRC); $(CHPARAM) hierarchy -top $(MODULE); proc; setattr -set keep 1 a:keep %ci1 c:* %i; $(call SYNTH_FAST,$(MODULE)) dfflibmap -liberty $(LIB); $(ABC_MAP); opt_clean; stat -liberty $(LIB); write_verilog -noattr build/$(MODULE)_netlist.v' 2>&1 | tee build/synth_netlist_$(MODULE).log
 	@# OpenSTA's Verilog reader rejects 'signed' on ports/wires (Yosys 0.69 emits it); a gate netlist does not need it.
 	@sed -i -E 's/^(  (input|output|inout|wire)) signed /\1 /' build/$(MODULE)_netlist.v
 
-# The PIPE_ROM=1 online_softmax netlist that tb/gls needs. This used to be a
-# hand-typed yosys command in docs/guide.md section 12 only, so README's
-# `make -C tb/gls all` was not runnable in order (review finding M4).
-synth-netlist-pipe1: check-lib
+# The PIPE_ROM=1 online_softmax netlist that tb/gls needs.
+synth-netlist-pipe1: check-lib $(ABC_SCRIPT)
 	@mkdir -p build
-	yosys -p 'read_verilog -sv -defer $(SRC); chparam -set PIPE_ROM 1 online_softmax; hierarchy -top online_softmax; synth -top online_softmax; dfflibmap -liberty $(LIB); abc -liberty $(LIB); opt_clean; stat -liberty $(LIB); write_verilog -noattr build/online_softmax_pipe1_netlist.v' 2>&1 | tee build/synth_netlist_online_softmax_pipe1.log
+	yosys -p 'read_verilog -sv -defer $(SRC); chparam -set PIPE_ROM 1 online_softmax; hierarchy -top online_softmax; $(call SYNTH_FAST,online_softmax) dfflibmap -liberty $(LIB); $(ABC_MAP); opt_clean; stat -liberty $(LIB); write_verilog -noattr build/online_softmax_pipe1_netlist.v' 2>&1 | tee build/synth_netlist_online_softmax_pipe1.log
 	@# OpenSTA's Verilog reader rejects 'signed' on ports/wires (Yosys 0.69 emits it); a gate netlist does not need it.
 	@sed -i -E 's/^(  (input|output|inout|wire)) signed /\1 /' build/online_softmax_pipe1_netlist.v
 
@@ -106,15 +126,18 @@ sta-pipe1: check-lib
 	LIB=$(LIB) NETLIST=build/online_softmax_pipe1_netlist.v MODULE=online_softmax PERIOD_NS=$(PERIOD_NS) \
 	  opensta -no_init scripts/sta.tcl 2>&1 | tee build/sta_online_softmax_pipe1.log
 
-# Top-level STA (2026-09-19, target-scores change 3): synthesize the whole
-# engine to sky130 cells and time it, then summarize WNS/TNS, the worst
-# path's start/end points and which block owns it. The memories flatten to
-# flip-flop RAM in this standard-cell flow (no SRAM macro is modeled), so
-# the result is labeled "flattened standard-cell estimate" by the summary.
+# Top-level STA: the whole engine (PIPE_ROM=1, PV_SPLIT=1, the standard-cell
+# configuration) synthesized to sky130 cells and timed, then summarized (WNS,
+# worst path, owning block). The four memories are SRAM macros in an ASIC,
+# so scripts/sync_ram_sta_stub.sv stands in for rtl/sync_ram.sv: a flop at
+# every macro pin, macro access time not modeled (no sky130 SRAM liberty
+# in this flow). Flattening them into 32k flip-flops instead is what gave
+# the earlier, meaningless -526 ns.
+TOP_STA_SRC = $(filter-out rtl/sync_ram.sv,$(SRC)) scripts/sync_ram_sta_stub.sv
 sta-top: check-lib
-	$(MAKE) synth-netlist MODULE=attention_top
+	$(MAKE) synth-netlist MODULE=attention_top PERIOD_NS=$(PERIOD_NS) NETLIST_SRC="$(TOP_STA_SRC)" CHPARAM="chparam -set PIPE_ROM 1 attention_top;"
 	$(MAKE) sta MODULE=attention_top PERIOD_NS=$(PERIOD_NS)
-	python3 scripts/sta_summary.py build/sta_attention_top.log --period $(PERIOD_NS) --out build/sta_attention_top_summary.txt
+	python3 scripts/sta_summary.py build/sta_attention_top.log --period $(PERIOD_NS) --netlist build/attention_top_netlist.v --out build/sta_attention_top_summary.txt
 
 # Phase 4 GLS of both online_softmax netlists, with the netlists built first.
 gls:

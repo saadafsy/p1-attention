@@ -17,7 +17,7 @@
 // The exemption leans on the Xilinx target's configuration-time global
 // set/reset (GSR): at the end of FPGA configuration every flop loads its
 // INIT value (0 here), so the unreset stages start defined on silicon even
-// though simulation shows X until the first samples propagate. Auditor
+// though simulation shows X until the first samples propagate. Reviewer
 // flag: this is Xilinx-specific; reusing this file on a non-Xilinx target
 // or an ASIC flow without a power-on-reset equivalent needs a real POR.
 module sync2ff #(

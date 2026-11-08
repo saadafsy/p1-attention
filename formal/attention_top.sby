@@ -31,7 +31,7 @@
 #
 # Inner-module assertions are stripped below (chformal -assert -remove on
 # mac_unit, matmul_tile, online_softmax) because each of those contracts is
-# already proven standalone and auditor-countersigned (formal/mac_unit.sby,
+# already proven standalone and independently re-run (formal/mac_unit.sby,
 # formal/matmul_tile.sby, formal/online_softmax.sby, all PASS, EVIDENCE.md
 # rows). Re-proving them again inside this integration-level BMC would be
 # redundant solver load for zero additional coverage: the three submodules
@@ -69,7 +69,7 @@ prove: btor btormc
 cover: smtbmc yices
 
 [script]
-read_verilog -sv -formal -DFORMAL mac_unit.sv matmul_tile.sv exp_lut_2p.sv online_softmax.sv attention_top.sv
+read_verilog -sv -formal -DFORMAL mac_unit.sv matmul_tile.sv exp_lut_1p.sv sync_ram.sv online_softmax.sv attention_top.sv
 prep -top attention_top
 chformal -assert -remove mac_unit
 chformal -assert -remove matmul_tile
@@ -78,7 +78,8 @@ chformal -assert -remove online_softmax
 [files]
 rtl/mac_unit.sv
 rtl/matmul_tile.sv
-rtl/exp_lut_2p.sv
+rtl/exp_lut_1p.sv
+rtl/sync_ram.sv
 rtl/online_softmax.sv
 rtl/attention_top.sv
 rtl/exp_lut.svh rtl/exp_lut.svh

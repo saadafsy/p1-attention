@@ -1,5 +1,11 @@
 # Tradeoffs: naive vs pipelined online_softmax (Phase 4/5)
 
+Note (2026-11-08): the clock and power figures below were measured with the
+earlier area-only synthesis flow. With the timing-driven flow and the
+one-lookup softmax (docs/uarch.md 8.4), PIPE_ROM=0 reaches about 85 MHz and
+PIPE_ROM=1 meets 100 MHz (docs/benchmark.md); the power proxy has not been
+re-run at those clocks.
+
 Status: Phase 5 deliverable. Compares the two elaborations of
 rtl/online_softmax.sv introduced in Phase 4 (docs/uarch.md 8.2.1): PIPE_ROM=0,
 the naive single-cycle comb-ROM recurrence, and PIPE_ROM=1, the registered-ROM

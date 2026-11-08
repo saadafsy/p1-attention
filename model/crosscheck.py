@@ -101,7 +101,7 @@ def main():
               "(docs/uarch.md 3.5)")
         return 1
     print(f"exp LUT verified: {LUT_HEX} == generator output, sha256 matches pin")
-    # fpga/exp_lut.mem: the XPM MEMORY_INIT_FILE for fpga/exp_lut_2p_xilinx.sv
+    # fpga/exp_lut.mem: the XPM MEMORY_INIT_FILE for fpga/exp_lut_1p_xilinx.sv
     # (same one-word-per-line format); it must be the same bytes so the FPGA
     # ROM and the models share the single table (2026-09-19).
     mem = ROOT / "fpga" / "exp_lut.mem"

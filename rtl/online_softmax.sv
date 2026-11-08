@@ -1,152 +1,101 @@
 `timescale 1ns / 1ps
-// online_softmax: per-row online-softmax (m, l) state machine. Third block of
-// the datapath (normative spec: docs/uarch.md section 8.2; recurrence:
-// section 6; LUT and index math: 3.5; DEN bound: 3.6; rounding: section 4;
-// PIPE_ROM pipelining variant: 8.2.1).
+// online_softmax: per-row online softmax state (running max m, denominator
+// l). Spec: docs/uarch.md section 6 (recurrence), 3.5 (LUT index), 3.6 (DEN
+// bound), 8.2 / 8.2.1 (this module).
 //
-// Function, per accepted score s (in_valid = 1), with base state
-// (m, l) = (-32768, 0) when row_start is also high (section 6 init):
+// Per accepted score s (in_valid), with (m, l) = (-32768, 0) on row_start:
 //   m_new = max(m, s)
-//   r     = lut[ idx(m - m_new) ]     rescale factor, WGT UQ1.15
-//   w     = lut[ idx(s - m_new) ]     this element's weight, WGT UQ1.15
-//   l     <= rshr(l * r, 15) + w      DEN UQ9.15 (rounding site 3)
-//   m     <= m_new
-// idx(): 17-bit signed diff, clamp to -16384, then min((-d + 8) >> 4, 1023)
-// (rounding site 2). rshr(x, 15) = (x + 2^14) >> 15, round-half-up.
-// The NUM path and the final division live in attention_top, not here.
+//   r     = lut[idx(m - m_new)]    rescale factor, UQ1.15
+//   w     = lut[idx(s - m_new)]    element weight, UQ1.15
+//   l    <= rshr(l * r, 15) + w    DEN UQ9.15
 //
-// Parameter PIPE_ROM (default 0), docs/uarch.md 8.2.1:
-//   0: normative single-cycle configuration, out_valid latency 1,
-//      bit-identical to the pre-parameter module; the configuration
-//      attention_top instantiates.
-//   1: Phase 4 timing variant. The critical path diff -> clamp -> index ->
-//      ROM -> (l * r multiply) -> rshr -> add is cut at the ROM output:
-//      w, r register into a pipe stage (with pipelined valid and row_start
-//      context) and the l update runs the next cycle. out_valid latency 2;
-//      m stays latency 1 (its compare/mux recurrence must close in one
-//      cycle for throughput and has no long path, so visible m leads
-//      out_valid by one cycle). Per-element VALUES of m, l, w, r are
-//      identical in both configurations; only alignment shifts.
+// Implementation: one of the two LUT arguments is always 0, because m_new is
+// either m or s. So a single subtractor d = s - m gives everything:
+//   d >= 0 (s is the new max): m_new = s, r = lut[idx(-d)], w = lut[0]
+//   d <  0 (m stays the max):  m_new = m, w = lut[idx(d)],  r = lut[0]
+// That is one ROM read per element instead of two, and the max compare is
+// the subtractor's sign bit instead of a separate comparator in series with
+// it. When r = lut[0] = 1.0 the rescale is exact (rshr(l * 2^15, 15) = l),
+// so that branch skips the multiplier: l <= l + w. Results are bit-identical
+// to the two-lookup form; the FORMAL block proves the index equivalence.
 //
-// Formats (normative, docs/uarch.md section 2):
-//   s, m  : SCORE, signed Q5.10, 16 bits
-//   w, r  : WGT, unsigned UQ1.15, 16 bits, values in [0, 0x8000]
-//   l     : DEN, unsigned UQ9.15, 24 bits; l * r is a 40-bit (24u x 16u)
-//           intermediate, never registered; no saturation anywhere in this
-//           module (DEN cannot overflow for row lengths <= 256, proof by
-//           induction in uarch.md 3.6; the models assert the bound)
+// PIPE_ROM = 0: whole update in one cycle; w, r, l, out_valid one cycle
+//   after the accepted s (m too).
+// PIPE_ROM = 1: the ROM read is registered, so w, r, l, out_valid arrive two
+//   cycles after s; m still updates after one (its compare must close every
+//   cycle for back-to-back elements). Same values, shifted one cycle.
 //
-// Timing contract, PIPE_ROM = 0 (single-cycle recurrence, no backpressure):
-// (m, l) update on the edge that consumes s; w, r, out_valid register on the
-// same edge, so in the out_valid cycle the visible l already includes the
-// element (w, r) describe. Rows may be back to back (row_start with
-// in_valid, no dead cycle). Cycle diagram for a 3-element row (state as
-// visible DURING the cycle; mj, lj = state after elements 0..j):
-//
-//   cycle       |  0   |  1     |  2     |  3     |  4
-//   in_valid    |  1   |  1     |  1     |  0     |  0
-//   row_start   |  1   |  0     |  0     |  0     |  0
-//   s           |  s0  |  s1    |  s2    |  x     |  x
-//   m (visible) |  old |  s0    |  m1    |  m2    |  m2
-//   l (visible) |  old |  l0    |  l1    |  l2    |  l2
-//   out_valid   |  0   |  1     |  1     |  1     |  0
-//   w (visible) |  x   |  w(s0) |  w(s1) |  w(s2) |  w(s2)
-//   r (visible) |  x   |  r(s0) |  r(s1) |  r(s2) |  r(s2)
-//
-// PIPE_ROM = 1 shifts l, w, r, out_valid one cycle right (m unchanged);
-// diagram and back-to-back row semantics in uarch.md 8.2.1.
-//
-// exp LUT: the GENERATED case function exp_lut_rom() in rtl/exp_lut.svh
-// (emitted only by model/attn.py --emit-lut-svh; same table as the
-// sha256-pinned model/exp_lut.hex; rationale in uarch.md 8.2). PIPE_ROM = 0
-// reads it combinationally (two muxes of the same constant table).
-// PIPE_ROM = 1 (2026-09-19) reads it through rtl/exp_lut_2p.sv, a two-port
-// registered-output ROM module whose output registers ARE the w_p / r_p
-// stage-1 registers of uarch.md 8.2.1; with `define XILINX_FPGA the FPGA
-// twin fpga/exp_lut_2p_xilinx.sv (one true dual-port block RAM per lane)
-// is instantiated instead, same ports, same latency, same contents.
+// Formats: s, m SCORE Q5.10 signed 16b; w, r WGT UQ1.15 16b (<= 0x8000);
+// l DEN UQ9.15 24b, no saturation (bounded by 2^23 for rows <= 256, 3.6).
+// Rows may be back to back (row_start with in_valid, no dead cycle).
 module online_softmax #(
-    parameter bit PIPE_ROM = 1'b0  // 0: latency-1 (normative); 1: uarch 8.2.1
+    parameter bit PIPE_ROM = 1'b0
 ) (
     input  logic               clk,
     input  logic               rst,        // synchronous, active-high
-    input  logic               in_valid,   // accept score s this cycle
+    input  logic               in_valid,   // accept s this cycle
     input  logic               row_start,  // with in_valid: first element of a row
     input  logic signed [15:0] s,          // SCORE Q5.10
     output logic        [15:0] w,          // WGT UQ1.15, registered
     output logic        [15:0] r,          // WGT UQ1.15, registered
-    output logic               out_valid,  // w, r valid (1 + PIPE_ROM cycles after accepted s)
-    output logic        [23:0] l,          // DEN UQ9.15, current denominator
-    output logic signed [15:0] m           // SCORE Q5.10, current running max
+    output logic               out_valid,  // w, r, l valid (1 + PIPE_ROM cycles after s)
+    output logic        [23:0] l,          // DEN UQ9.15
+    output logic signed [15:0] m           // SCORE Q5.10, running max
 );
 
   `include "rtl/exp_lut.svh"
 
-  // Section 6 init values: most negative SCORE, empty denominator.
   localparam logic signed [15:0] MInit = 16'sh8000;  // -32768
+  localparam logic [15:0] ExpOne = 16'h8000;  // lut[0] = exp(0) in UQ1.15
 
-  // Pre-clamp LUT index of uarch.md 3.5 for a Q5.10 difference d <= 0:
-  // clamp to the domain floor -16384 (-16.0), negate, round-half-up to the
-  // 2^-6 grid. Result range [0, 1024]; the final min(., 1023) clamp is done
-  // by the caller so the pre-clamp value stays visible to the formal block.
-  function automatic logic [10:0] lut_index_pre(input logic signed [16:0] d);
-    logic signed [16:0] d_c;
-    logic [14:0] nd;
+  // Stage 1, shared by both configurations.
+  // |d| comes from two subtractors in parallel (s - m and m - s) picked by
+  // the sign, so no negation sits in series after the subtract. The LUT
+  // index min(round(min(|d|, 16384) / 16), 1023) reduces to: 1023 when
+  // |d| >= 16360 (round(16360 / 16) = 1023 and everything above clamps),
+  // else (|d| >> 4) + |d|[3] (round half up), a 13-bit increment.
+  logic signed [15:0] m_base;  // m entering this step (row_start override)
+  logic signed [16:0] d;  // s - m_base, in [-65535, 65535]
+  logic signed [16:0] d_neg;  // m_base - s
+  logic               s_max;  // d >= 0: s becomes the running max
+  logic signed [15:0] m_n;
+  logic        [16:0] d_abs;  // |d|
+  logic        [ 9:0] idx;  // the one non-trivial LUT index
+
+  always_comb begin
+    m_base = row_start ? MInit : m;
+    d      = 17'(s) - 17'(m_base);
+    d_neg  = 17'(m_base) - 17'(s);
+    s_max  = !d[16];
+    m_n    = s_max ? s : m_base;
+    d_abs  = s_max ? d : d_neg;
+    idx    = (d_abs >= 17'd16360) ? 10'd1023 : 10'(d_abs[13:4] + {9'd0, d_abs[3]});
+  end
+
+  // l update: l_next = s_max ? rshr(l_base * q, 15) + 1.0 : l_base + q,
+  // where q is the looked-up value. rshr(x, 15) + 2^15 is computed as
+  // (x + 2^14 + 2^30) >> 15, which is exact (adding a multiple of 2^15
+  // before the shift) and leaves one adder after the multiplier instead of
+  // two. Bits above 23 are provably zero for spec-compliant rows (l <= 2^23,
+  // uarch 3.6), so the 24-bit casts drop nothing.
+  function automatic logic [23:0] l_next(input logic [23:0] l_base, input logic [15:0] q,
+                                         input logic sm);
+    // verilator lint_off UNUSEDSIGNAL
+    logic [38:0] rnd;  // bits [14:0] are the rounding remainder, dropped by the shift
+    // verilator lint_on UNUSEDSIGNAL
     begin
-      d_c = (d < -17'sd16384) ? -17'sd16384 : d;  // diff clamp (section 5)
-      nd = 15'(-d_c);  // in [0, 16384], 15 bits
-      lut_index_pre = 11'((nd + 15'd8) >> 4);  // rounding site 2
+      rnd = 39'(l_base * q) + 39'h4000_4000;  // 2^30 + 2^14
+      l_next = sm ? rnd[38:15] : 24'(l_base + 24'(q));
     end
   endfunction
 
-  // Stage-1 combinational logic, identical in both configurations: base mux,
-  // running max, diffs, index math, both ROM lookups.
-  logic signed [15:0] m_base;  // state entering this step (row_start override)
-  logic signed [15:0] m_n;  // m_new of section 6
-  logic signed [16:0] diff_m;  // m_base - m_new, 17-bit, always <= 0
-  logic signed [16:0] diff_s;  // s      - m_new, 17-bit, always <= 0
-  logic        [10:0] idxp_r;  // pre-clamp indices, in [0, 1024]
-  logic        [10:0] idxp_w;
-  logic        [ 9:0] idx_r;  // final LUT indices (index clamp, section 5)
-  logic        [ 9:0] idx_w;
-
-  // All signals assigned unconditionally: no latches.
-  always_comb begin
-    m_base = row_start ? MInit : m;
-    m_n    = (m_base >= s) ? m_base : s;
-    diff_m = 17'(m_base) - 17'(m_n);
-    diff_s = 17'(s) - 17'(m_n);
-    idxp_r = lut_index_pre(diff_m);
-    idxp_w = lut_index_pre(diff_s);
-    idx_r  = (idxp_r > 11'd1023) ? 10'd1023 : idxp_r[9:0];
-    idx_w  = (idxp_w > 11'd1023) ? 10'd1023 : idxp_w[9:0];
-  end
-
   if (PIPE_ROM == 1'b0) begin : g_lat1
-    // Normative latency-1 configuration (uarch.md 8.2): the whole recurrence
-    // closes in the cycle that consumes s. Both ROM lookups are
-    // combinational reads of the generated case function.
-    logic [15:0] r_n;  // ROM outputs = next w, r
-    logic [15:0] w_n;
+    logic [15:0] q;
     logic [23:0] l_base;
-    logic [39:0] lr_prod;  // l * r, 24u x 16u, never registered
-    logic [40:0] lr_rnd;  // + 2^14 round-half-up bias
-    logic [23:0] l_resc;  // rshr(l * r, 15)
-    logic [23:0] l_n;
 
     always_comb begin
-      r_n     = exp_lut_rom(idx_r);
-      w_n     = exp_lut_rom(idx_w);
-      l_base  = row_start ? 24'd0 : l;
-      // Rounding site 3: l = rshr(l * r, 15) + w. Bits above 23 of the
-      // shifted value are provably zero for spec-compliant rows (l <= 2^23
-      // by the 3.6 induction, r <= 2^15), and l_resc + w < 2^24 likewise;
-      // DEN carries no saturation by policy (section 5), so the casts
-      // truncate nothing.
-      lr_prod = l_base * r_n;
-      lr_rnd  = {1'b0, lr_prod} + 41'd16384;
-      l_resc  = 24'(lr_rnd >> 15);
-      l_n     = l_resc + 24'(w_n);
+      q      = exp_lut_rom(idx);
+      l_base = row_start ? 24'd0 : l;
     end
 
     always_ff @(posedge clk) begin
@@ -160,57 +109,36 @@ module online_softmax #(
         out_valid <= in_valid;
         if (in_valid) begin
           m <= m_n;
-          l <= l_n;
-          w <= w_n;
-          r <= r_n;
+          l <= l_next(l_base, q, s_max);
+          w <= s_max ? ExpOne : q;
+          r <= s_max ? q : ExpOne;
         end
       end
     end
   end else begin : g_lat2
-    // PIPE_ROM = 1 (uarch.md 8.2.1): stage boundary at the ROM output.
-    // Stage 1 registers the lookups (w_p, r_p) plus pipelined valid (v_p)
-    // and row context (rs_p); m commits in stage 1 (latency 1, required so
-    // the next element's diffs see it). Stage 2 runs the l update a cycle
-    // later. No l forwarding is needed: the l register IS the stage-2
-    // accumulator, its multiply/rshr/add loop closes within stage 2 in one
-    // cycle, and rs_p (not the live row_start) selects the l = 0 base so a
-    // back-to-back new row cannot corrupt the update in flight.
-    logic        v_p;  // stage-1/2 pipe: element in flight
-    logic        rs_p;  // pipelined row_start of that element
-    logic [15:0] w_p;  // registered ROM outputs (the ROM module's output regs)
-    logic [15:0] r_p;
+    // Stage 1 registers the ROM output (inside u_rom) plus the element's
+    // valid, row_start and s_max; stage 2 does the l update. rs_p, not the
+    // live row_start, picks the l = 0 base, so a back-to-back new row cannot
+    // corrupt the update in flight.
+    logic        v_p;
+    logic        rs_p;
+    logic        sm_p;
+    logic [15:0] q_p;
     logic [23:0] l_base;
 
-    // The stage boundary of uarch.md 8.2.1 IS the ROM's output register:
-    // w_p / r_p update on the accepting edge (en = in_valid) and hold
-    // otherwise, exactly as the inline registers they replace did.
 `ifdef XILINX_FPGA
-    exp_lut_2p_xilinx u_rom (
+    exp_lut_1p_xilinx u_rom (
 `else
-    exp_lut_2p u_rom (
+    exp_lut_1p u_rom (
 `endif
-        .clk   (clk),
-        .rst   (rst),
-        .en    (in_valid),
-        .addr_a(idx_w),
-        .addr_b(idx_r),
-        .dout_a(w_p),
-        .dout_b(r_p)
+        .clk (clk),
+        .rst (rst),
+        .en  (in_valid),
+        .addr(idx),
+        .dout(q_p)
     );
-    logic [39:0] lr_prod;  // l * r, 24u x 16u, never registered
-    logic [40:0] lr_rnd;  // + 2^14 round-half-up bias
-    logic [23:0] l_resc;  // rshr(l * r, 15)
-    logic [23:0] l_n;
 
-    always_comb begin
-      l_base  = rs_p ? 24'd0 : l;
-      // Rounding site 3, same arithmetic and same non-truncation argument
-      // as g_lat1; only the operand registers differ.
-      lr_prod = l_base * r_p;
-      lr_rnd  = {1'b0, lr_prod} + 41'd16384;
-      l_resc  = 24'(lr_rnd >> 15);
-      l_n     = l_resc + 24'(w_p);
-    end
+    always_comb l_base = rs_p ? 24'd0 : l;
 
     always_ff @(posedge clk) begin
       if (rst) begin
@@ -221,93 +149,85 @@ module online_softmax #(
         out_valid <= 1'b0;
         v_p       <= 1'b0;
         rs_p      <= 1'b0;
+        sm_p      <= 1'b0;
       end else begin
-        // Stage 1 commit: m plus the pipe context (w_p / r_p commit inside
-        // u_rom on the same edge, same in_valid enable).
         v_p <= in_valid;
         if (in_valid) begin
           m    <= m_n;
           rs_p <= row_start;
+          sm_p <= s_max;
         end
-        // Stage 2 commit: the l update and the visible w, r, out_valid.
         out_valid <= v_p;
         if (v_p) begin
-          l <= l_n;
-          w <= w_p;
-          r <= r_p;
+          l <= l_next(l_base, q_p, sm_p);
+          w <= sm_p ? ExpOne : q_p;
+          r <= sm_p ? q_p : ExpOne;
         end
       end
     end
   end
 
 `ifdef FORMAL
-  // Formal-only scaffolding (guarded, never synthesized; the initial block
-  // is exempt from the no-initial-in-RTL rule for that reason). Immediate
-  // assertions only, same style as mac_unit.sv. Solver-conscious: nothing
-  // below requires reasoning about ROM contents or multiplier correctness
-  // (those are the cocotb TB's job, checked against model/attn.py).
+  // Formal-only (never synthesized). Nothing here reasons about ROM contents
+  // or the multiplier; values are checked in cocotb against model/attn.py.
   logic f_past_valid;
   initial f_past_valid = 1'b0;
   always_ff @(posedge clk) f_past_valid <= 1'b1;
 
-  // Clamp-logic facts, combinational and configuration-independent: the
-  // diffs into the LUT index math are never positive (m_n is the max), and
-  // the index clamp works.
+  // Equivalence of the one-subtractor index with the two-lookup form of the
+  // spec (uarch 3.5): idx(x) for x <= 0 = min((min(-x, 16384) + 8) >> 4, 1023).
+  function automatic logic [9:0] spec_idx(input logic signed [16:0] x);
+    logic signed [16:0] xc;
+    logic [10:0] p;
+    begin
+      xc = (x < -17'sd16384) ? -17'sd16384 : x;
+      p = 11'((15'(-xc) + 15'd8) >> 4);
+      spec_idx = (p > 11'd1023) ? 10'd1023 : p[9:0];
+    end
+  endfunction
+
+  logic signed [15:0] f_m_spec;
+  logic signed [16:0] f_diff_m, f_diff_s;
   always_comb begin
-    assert (diff_m <= 17'sd0);
-    assert (diff_s <= 17'sd0);
-    assert (idxp_r <= 11'd1024);
-    assert (idxp_w <= 11'd1024);
-    assert (idx_r <= 10'd1023);
-    assert (idx_w <= 10'd1023);
+    f_m_spec = (m_base >= s) ? m_base : s;
+    f_diff_m = 17'(m_base) - 17'(f_m_spec);
+    f_diff_s = 17'(s) - 17'(f_m_spec);
+    assert (m_n == f_m_spec);
+    assert (f_diff_m <= 17'sd0 && f_diff_s <= 17'sd0);
+    assert (d_abs == (d[16] ? 17'(-d) : d));
+    // r index is idx when s is the new max, else 0; w index the reverse.
+    assert (spec_idx(f_diff_m) == (s_max ? idx : 10'd0));
+    assert (spec_idx(f_diff_s) == (s_max ? 10'd0 : idx));
   end
 
   if (PIPE_ROM == 1'b0) begin : g_f_lat1
-    // The audited latency-1 property list, unchanged (uarch.md 8.2).
     always_ff @(posedge clk) begin
       if (f_past_valid) begin
         if ($past(rst)) begin
-          // Reset state.
           assert (m == 16'sh8000);
           assert (l == 24'd0);
           assert (out_valid == 1'b0);
         end else if (!$past(in_valid)) begin
-          // Hold: no accepted element, nothing moves, no stale out_valid.
+          // No accepted element: everything holds, out_valid low.
           assert (m == $past(m));
           assert (l == $past(l));
           assert (w == $past(w));
           assert (r == $past(r));
           assert (out_valid == 1'b0);
         end else begin
-          // Accepted element: out_valid rises exactly one cycle later.
           assert (out_valid == 1'b1);
           if ($past(row_start)) begin
-            // Section 6 identity 2 (max part): first element sets m = s0.
             assert (m == $past(s));
           end else begin
-            // m monotone non-decreasing between row starts. Kept alongside
-            // the stronger property below (harmless, avoids churn in the
-            // audited property list); the exact-max recurrence strictly
-            // subsumes it.
-            assert (m >= $past(m));
-            // Formal-coverage auditor finding: the monotonicity assert above
-            // passes even if m latched a wrong value larger than $past(m) (a
-            // bug that overshoots the true max would still look monotonic).
-            // This property pins m to the exact section-6 recurrence
-            // m_new = max(m, s), evaluated only over $past(s)/$past(m) (a
-            // comparison and a mux over already-registered values, no ROM or
-            // multiplier reasoning), so it strictly subsumes monotonicity.
+            // Exact max recurrence (subsumes monotonicity).
             assert (m == (($past(s) >= $past(m)) ? $past(s) : $past(m)));
           end
+          // One of w, r is always exp(0).
+          assert (w == ExpOne || r == ExpOne);
         end
       end
     end
   end else begin : g_f_lat2
-    // PIPE_ROM = 1 properties (uarch.md 8.2.1): the m recurrence is still
-    // latency 1 and keeps its exact-max property; l, w, r, out_valid move to
-    // latency 2, expressed purely over ports with two cycles of history so
-    // no reference into the g_lat2 pipe registers (and no assumption about
-    // their free pre-reset value) is needed.
     logic f_past_valid2;
     initial f_past_valid2 = 1'b0;
     always_ff @(posedge clk) f_past_valid2 <= f_past_valid;
@@ -315,25 +235,20 @@ module online_softmax #(
     always_ff @(posedge clk) begin
       if (f_past_valid) begin
         if ($past(rst)) begin
-          // Reset state (v_p and the pipe registers reset too; port view).
           assert (m == 16'sh8000);
           assert (l == 24'd0);
           assert (out_valid == 1'b0);
         end else if (!$past(in_valid)) begin
-          // m hold: stage 1 is untouched without an accepted element.
           assert (m == $past(m));
         end else begin
-          // m recurrence, unchanged from the latency-1 configuration.
           if ($past(row_start)) begin
             assert (m == $past(s));
           end else begin
-            assert (m >= $past(m));
             assert (m == (($past(s) >= $past(m)) ? $past(s) : $past(m)));
           end
         end
-        // Latency-2 alignment: with two clean (reset-free) history cycles,
-        // out_valid mirrors in_valid from two cycles earlier, and l, w, r
-        // only move when an element was accepted two cycles earlier.
+        // Latency 2: out_valid mirrors in_valid two cycles back; l, w, r
+        // move only for an element accepted two cycles back.
         if (f_past_valid2 && !$past(rst) && !$past(rst, 2)) begin
           assert (out_valid == $past(in_valid, 2));
           if (!$past(in_valid, 2)) begin

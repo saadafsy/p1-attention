@@ -19,7 +19,8 @@ TOPLEVEL_LANG ?= verilog
 PWD := $(shell pwd)
 VERILOG_SOURCES = $(PWD)/../../rtl/mac_unit.sv \
                    $(PWD)/../../rtl/matmul_tile.sv \
-                   $(PWD)/../../rtl/exp_lut_2p.sv \
+                   $(PWD)/../../rtl/exp_lut_1p.sv \
+                   $(PWD)/../../rtl/sync_ram.sv \
                    $(PWD)/../../rtl/online_softmax.sv \
                    $(PWD)/../../rtl/attention_top.sv \
                    $(PWD)/../../fpga/sync2ff.sv \

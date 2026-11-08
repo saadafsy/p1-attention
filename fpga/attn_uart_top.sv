@@ -168,9 +168,12 @@ module attn_uart_top #(
 
   // PIPE_ROM = 1: registered-ROM softmax lanes (one block RAM per lane
   // under `define XILINX_FPGA), the timing configuration of uarch.md
-  // 8.2.1; attention_top absorbs the extra cycle internally (2026-09-19).
+  // 8.2.1; attention_top absorbs the extra cycle internally.
+  // PV_SPLIT = 0: one PV product per column, which maps onto DSP48 slices
+  // (the split form is for standard-cell timing and would need ~150 DSPs).
   attention_top #(
-      .PIPE_ROM(1'b1)
+      .PIPE_ROM(1'b1),
+      .PV_SPLIT(1'b0)
   ) u_attn (
       .clk        (clk),
       .rst        (rst),

@@ -1,6 +1,6 @@
 # evidence/: tracked copies of the reports EVIDENCE.md cites
 
-EVIDENCE.md rows for synthesis, STA, GLS, power and the auditor re-runs
+EVIDENCE.md rows for synthesis, STA, GLS, power and the reviewer re-runs
 cite files under build/, which is gitignored, so until 2026-09-18 none of
 the quoted numbers (slack, cell counts, toggle totals, mW) could be
 inspected from a clone (review finding F014).

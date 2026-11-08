@@ -15,9 +15,9 @@ SIM ?= verilator
 TOPLEVEL_LANG ?= verilog
 
 PWD := $(shell pwd)
-# rtl/exp_lut_2p.sv is the registered two-port ROM the PIPE_ROM=1
+# rtl/exp_lut_1p.sv is the registered one-port ROM the PIPE_ROM=1
 # elaboration instantiates (2026-09-19); unused by PIPE_ROM=0.
-VERILOG_SOURCES = $(PWD)/../../rtl/exp_lut_2p.sv \
+VERILOG_SOURCES = $(PWD)/../../rtl/exp_lut_1p.sv \
                    $(PWD)/../../rtl/online_softmax.sv
 
 COCOTB_TOPLEVEL = online_softmax

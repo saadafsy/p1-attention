@@ -15,7 +15,7 @@ wrap; the wrap test exists only to pin the register width.
 Drive on RisingEdge, sample on FallingEdge (post-NBA, stable), same house
 style as tb/mac_unit/test_mac_unit.py.
 
-Seed plumbing (mandatory, carried-forward auditor finding from mac_unit):
+Seed plumbing (mandatory, carried-forward review finding from mac_unit):
 cocotb 2.0.1 sets cocotb.RANDOM_SEED per test (regression.py hashes the test
 fullname together with the COCOTB_RANDOM_SEED env var the Makefile exports)
 and reseeds the global `random` module with that value before the test body
@@ -294,7 +294,7 @@ async def extremes_and_width_edges(dut):
     # ceil(8388608 / 16256) = 517 terms (516*16256 = 8388096 is still
     # in-bound; 517*16256 = 8404352 is 15744 past the boundary and wraps).
     # So crossing takes 6 more cycles past the 511-term point, not 2; the
-    # task prompt's "2 more cycles" arithmetic does not reach the boundary
+    # naive "2 more cycles" arithmetic does not reach the boundary
     # for this operand pair, so this test uses the correct count (6) and
     # documents it here rather than weakening the check to match a wrong
     # cycle count.

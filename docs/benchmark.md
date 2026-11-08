@@ -1,67 +1,92 @@
-# Phase 2 benchmark: attention_top cycle counts vs the CPU golden model
+# Benchmark: timing, throughput, accuracy, resources
 
-Sources (both machine-generated, reproducible):
-- Accelerator side: tb/attention_top/cycles.txt, recorded by the cocotb
-  end-to-end test; every value matches the closed-form model
-  cycles = nblk*(16*nblk+156)+1 with nblk = N/4 (docs/uarch.md 8.3) exactly.
-- CPU side: build/cpu_baseline.txt from scripts/benchmark_cpu.py: the
-  bit-exact C++ golden model (attn.cpp, -O2, single thread), median of 15
-  full-process runs, with the measured process floor (startup + file I/O,
-  1.154 ms) subtracted to estimate compute-only time. This baseline is a
-  GOLDEN MODEL, not a tuned BLAS kernel; the comparison is honest about that.
+All numbers here are regenerable from a clone with the commands listed.
+None of them is a hardware measurement: timing is static timing analysis
+at the sky130 typical corner, and FPGA numbers are synthesis counts.
 
-Clock disclaimer: cycle counts are clock-independent simulation facts. The
-times below are ILLUSTRATIVE at the two Phase 4 signed clocks for the
-online_softmax block, the design's expected Fmax limiter
-([EVIDENCE: phase4-sta], docs/tradeoffs.md): 38.5 MHz is the met period of
-the default comb-ROM config (26 ns, sky130 tt), 76.9 MHz the met period of
-the PIPE_ROM=1 registered-ROM variant (13 ns). Both are block-level OpenSTA
-tool estimates; attention_top itself instantiates the default config and its
-integrated netlist has not been through STA, so neither column is a signed
-Fmax for the top. Earlier revisions of this file quoted 44 MHz from a
-pre-Phase-4 smoke run of the same log; superseded.
+## Timing (sky130_fd_sc_hd, tt 25C 1.80V, OpenSTA, 10 ns target)
 
-| N  | cycles | @38.5 MHz | @76.9 MHz | CPU compute-only | speedup @38.5 | @76.9 |
-|----|--------|-----------|-----------|------------------|---------------|-------|
-| 4  | 173    | 4.5 us    | 2.2 us    | ~0 (below floor resolution) | n/a | n/a |
-| 8  | 377    | 9.8 us    | 4.9 us    | ~0 (below floor resolution) | n/a | n/a |
-| 16 | 881    | 22.9 us   | 11.5 us   | 82 us            | 3.6x          | 7.1x  |
-| 32 | 2273   | 59.0 us   | 29.6 us   | 140 us           | 2.4x          | 4.7x  |
-| 64 | 6593   | 171.2 us  | 85.7 us   | 275 us           | 1.6x          | 3.2x  |
+| block | config | setup slack @ 10 ns | meets |
+|-------|--------|---------------------|-------|
+| matmul_tile (4x4 MAC array) | - | +3.37 ns | ~150 MHz |
+| online_softmax | PIPE_ROM=1 (registered ROM) | +0.51 ns | 100 MHz |
+| online_softmax | PIPE_ROM=0 (single cycle) | -1.76 ns | ~85 MHz |
+| attention_top (whole engine) | PIPE_ROM=1, SRAM macros as flop boundaries | -0.72 ns | ~93 MHz |
 
-(CPU compute-only = median minus the 1.154 ms process floor; at N = 4 and 8
-the subtraction is inside measurement noise and no speedup is claimed.)
+Commands: `make sta MODULE=matmul_tile`, `make sta-pipe1`,
+`make synth-netlist MODULE=online_softmax && make sta MODULE=online_softmax`,
+`make sta-top` (summary in build/sta_attention_top_summary.txt).
 
-Utilization view (clock-free, the more meaningful number). Corrected
-2026-09-18: the earlier revision counted 2 * N^2 * D = 131,072 "MACs" per
-side, which is the multiply-and-add OPERATION count, and then called the
-262k total MACs; the resulting "over 100% busy" conclusion was impossible
-on its face and was the tell. One N = 64 inference performs N^2 * D =
-65,536 MACs on the Q.K^T side and 65,536 on the PV side, 131,072 MACs in
-total, plus 8,192 exp lookups (w and r per element) and 1,024 divisions, in
-6,593 cycles: 19.9 sustained MAC/cycle. The engine instantiates 48
-multipliers (16 in the tile, 16 acc*r rescale and 16 w*v in the shared PV
-datapath, docs/uarch.md 8.3); against the 32 that perform golden-model MACs
-(tile + w*v) that is 62% utilization, and against all 48 it is 41%. The gap
-to the ideal comes from the group tails (S_DRAIN_LAST + S_DIVIDE, 156
-cycles per group, 38% of the 412-cycle group at N = 64) and from the PV
-side idling during block 0 of every group (nothing to drain yet).
+Flow: yosys with Booth multipliers, Kogge-Stone adders and a flattened
+netlist, ABC mapping with a 10 ns delay target plus buffering and gate
+sizing (scripts/abc_timing.abc), OpenSTA with ideal clocks and zero I/O
+delay. What it does not include: placement and wire parasitics, clock
+tree, and (for attention_top) the SRAM macros' own access time, because no
+sky130 SRAM liberty is part of this flow. A placed-and-routed result would
+differ; the ranking of paths would not change much.
 
-Scope of the cycle counts: cycle_count covers the run only, from the
-accepted start pulse to done. Loading Q, K and V through the byte-serial
-load port costs 3 * N * D cycles on top (3,072 cycles at N = 64, i.e. 47%
-of the 6,593-cycle run) and reading the output back another N * D; the
-speedup column therefore ignores I/O entirely, which is the usual
-accelerator-benchmark convention but must be said.
+History, so the numbers can be compared: the first flow mapped area-only
+(no delay target, minimum-size cells, no buffering). On the same tools it
+reported online_softmax -12.2 ns (PIPE_ROM=0) and -2.5 ns (PIPE_ROM=1),
+and attention_top -526 ns, the last because the memories flattened into
+32k flip-flops driven by unbuffered selects. The changes that took it to
+the table above are in docs/uarch.md 8.4 (RTL) and the Makefile header
+(flow).
 
-Honest caveats, in order of importance:
-1. The CPU baseline is the reference model, compiled -O2 but written for
-   bit-exactness, not speed (arbitrary-width int64 arithmetic, asserts on).
-   A vectorized int8 kernel on a modern core would be much faster; this
-   table demonstrates the accelerator's cycle economy, not victory over
-   optimized CPU software.
-2. The speedup column inherits the clock disclaimer; only the cycle counts
-   and the CPU milliseconds are measurements.
-3. Scaling: accelerator cycles grow ~N^2 (the 16*nblk^2 term dominates), the
-   same asymptotic as the CPU; the constant factor is the story, plus the
-   deterministic latency (no cache effects).
+## Throughput (clock-free, from the cycle formula)
+
+cycles = nblk * (16 * nblk + 156) + 1, nblk = N / 4 (docs/uarch.md 8.3;
+tb/attention_top checks it exactly for every run). MACs per inference are
+N^2 * D for Q.K^T plus N^2 * D for P.V.
+
+| N | cycles | MACs | MAC/cycle | of 32 MAC units | time @ 93 MHz |
+|---|--------|------|-----------|-----------------|---------------|
+| 4 | 173 | 512 | 3.0 | 9% | 1.9 us |
+| 8 | 377 | 2048 | 5.4 | 17% | 4.1 us |
+| 16 | 881 | 8192 | 9.3 | 29% | 9.5 us |
+| 32 | 2273 | 32768 | 14.4 | 45% | 24.4 us |
+| 64 | 6593 | 131072 | 19.9 | 62% | 70.9 us |
+
+The 32 MAC units are the 16 in the tile plus the 16 w*v columns (the 16
+acc*r rescale multipliers are overhead, not MACs). The gap to 100% is the
+per-group tail (S_DRAIN_LAST + S_DIVIDE, 156 cycles per group, 38% of a
+group at N = 64) and the PV side idling during block 0 of every group.
+I/O is not in the cycle count: loading Q, K, V through the byte-serial
+port costs 3 * N * D cycles (3072 at N = 64) and reading the output back
+N * D more.
+
+## Accuracy vs float64
+
+The bit-exact model (which the RTL matches every cycle) against float64
+attention on the same dequantized inputs, 20 seeds per row, errors in
+output LSBs (Q1.6, 1 LSB = 1/64). The floor is 0.5 LSB: rounding an exact
+float result to Q1.6 already costs that. `python3 scripts/accuracy.py`.
+
+| inputs | N | max err | mean err | within 1 LSB | equal to rounded float |
+|--------|---|---------|----------|--------------|------------------------|
+| uniform int8 | 4 | 0.80 | 0.262 | 100% | 92.7% |
+| uniform int8 | 16 | 0.82 | 0.258 | 100% | 92.8% |
+| uniform int8 | 64 | 0.72 | 0.255 | 100% | 94.6% |
+| gaussian (sigma 0.5) | 4 | 0.60 | 0.259 | 100% | 95.6% |
+| gaussian (sigma 0.5) | 16 | 0.59 | 0.249 | 100% | 97.4% |
+| gaussian (sigma 0.5) | 64 | 0.58 | 0.249 | 100% | 98.3% |
+
+Every output is within 1 LSB of float64, and 93 to 98% are exactly the
+rounded float answer.
+
+## FPGA resources (Artix-7, yosys synth_xilinx, synthesis only)
+
+fpga/attn_uart_top.sv (engine plus UART wrapper), `bash scripts/fpga_resources.sh`:
+
+| resource | used | Basys 3 (XC7A35T) |
+|----------|------|-------------------|
+| DSP48E1 | 84 | 90 |
+| RAMB18E1 | 6 | 100 |
+| RAM64M (distributed RAM) | 96 | - |
+| LUTs (LUT1-LUT6) | about 8.7k | 20,800 |
+| flip-flops | about 5.0k | 41,600 |
+
+Q and K and the four exp ROMs are block RAM, V and out are distributed
+RAM: none of the memories is built from flip-flops. Placement, routing
+and the FPGA Fmax need Vivado (fpga/scripts/build.tcl), which has not been
+run.

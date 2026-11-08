@@ -1,0 +1,3 @@
+# Whole-file line-coverage exclusions for attention_top (scripts/check_coverage.py).
+# Same exclusion for the PIPE_ROM=1 run (the ROM is reached through rtl/exp_lut_1p.sv there).
+exp_lut.svh generated exp_lut ROM: its 1024 arms are swept entry for entry in tb/online_softmax (rom_full_sweep, 1029/1030 lines) and pinned by sha256 at TB import; see coverage.vlt

@@ -57,7 +57,7 @@ run through Vivado, and every hardware claim stays PENDING-HARDWARE.
 
 Prerequisite already in the tree (change list item "fix the exp LUT"): with
 `XILINX_FPGA` defined (build.tcl does), each online_softmax lane reads its
-two exp lookups from one XPM dual-port block ROM (fpga/exp_lut_2p_xilinx.sv,
+one exp lookup per element from an XPM block ROM (fpga/exp_lut_1p_xilinx.sv,
 initialized from fpga/exp_lut.mem, the same bytes as model/exp_lut.hex, both
 verified by `make model-check`); attn_uart_top instantiates attention_top
 with PIPE_ROM = 1, the registered-read configuration that block ROM
@@ -243,7 +243,7 @@ simulation as a full system testbench (6.3.6). Nothing in fpga/ has been
 synthesized in Vivado or run on a board. Every on-hardware behavior
 described here stays PENDING-HARDWARE per section 10. The core verify flow (Makefile
 SRC := rtl/*.sv) never sees fpga/: these files live outside the
-countersigned rtl/ tree and instantiate it unmodified.
+independently re-checked rtl/ tree and instantiate it unmodified.
 
 Vendor neutrality: no Xilinx primitives and no IP instantiations. VIO, ILA
 and any MMCM remain Vivado-side steps (sections 6.1 and 7). Everything in
@@ -632,7 +632,6 @@ EVIDENCE.md something like:
 
 | fpga-bringup-matmul_tile | tile computes correct dot products on Basys 3 at 100 MHz | PASS | host script vs model/attn.py, N vectors; Vivado timing summary WNS=+X ns; photos/ILA captures in docs/bench/ | 0 |
 
-Until that row exists, everything in this file is a plan, the PLAN.md row
-stays [Blocked: needs bench], and no FPGA claim may appear in docs/guide.md or a
-resume bullet. The audit-guide hook enforces this for docs/guide.md; you enforce
-it everywhere else.
+Until that row exists, everything in this file is a plan and no FPGA claim
+may appear in docs/guide.md or a resume bullet. `make audit-guide` enforces
+this for the claim documents.

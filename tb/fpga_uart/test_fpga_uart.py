@@ -29,7 +29,7 @@ only stable-sorts by `stage`, which defaults equal for all tests here), so
 declaring the closure check last in this file is sufficient for it to see
 everything the earlier tests recorded into the module-level EXERCISED set.
 
-Concurrency note (auditor finding, framing/resync tests): a plain "write a
+Concurrency note (review finding, framing/resync tests): a plain "write a
 burst, then recv_byte() once" pattern MISSES anything the DUT transmits
 WHILE this TB's own coroutine is still busy driving uart_rx (this Python
 coroutine cannot listen and drive at the same time). Real hardware has no
@@ -520,7 +520,7 @@ async def test_framing_error_resilience(dut):
     """A low glitch on uart_rx behaves in one of TWO genuinely different
     ways, both real bench symptoms, both checked here by MONITORING uart_tx
     for the whole window rather than assuming what did or did not happen
-    (guide 6.3.3/6.3.4, auditor finding: the original version of this test
+    (guide 6.3.3/6.3.4, review finding: the original version of this test
     silently swallowed a spurious response inside an unmonitored dead
     window and asserted a false claim):
 
@@ -594,7 +594,7 @@ async def test_framing_error_resilience(dut):
 async def test_reset_mid_operation(dut):
     """TWO reset-recovery scenarios, each followed by a full reload + run +
     readback to prove recovery (RAM contents carry no reset, uarch.md 8.3,
-    exactly like tb/attention_top's rst_mid_run convention). Auditor
+    exactly like tb/attention_top's rst_mid_run convention). Reviewer
     finding: the previous single-scenario version of this test claimed
     coverage of "any in-flight UART byte" it did not actually exercise (the
     line was idle at reset time in that scenario); this version either runs

@@ -23,15 +23,15 @@ file mkdir $out_dir
 
 create_project -in_memory -part $part
 set_property target_language Verilog [current_project]
-# XILINX_FPGA selects fpga/exp_lut_2p_xilinx.sv (XPM block ROM) in online_softmax.sv
+# XILINX_FPGA selects fpga/exp_lut_1p_xilinx.sv (XPM block ROM) in online_softmax.sv
 set_property verilog_define {XILINX_FPGA=1} [current_fileset]
 set_property include_dirs [list $root] [current_fileset]
 
 read_verilog -sv [list \
   $root/rtl/mac_unit.sv $root/rtl/matmul_tile.sv \
-  $root/rtl/exp_lut_2p.sv $root/rtl/online_softmax.sv $root/rtl/attention_top.sv \
+  $root/rtl/exp_lut_1p.sv $root/rtl/sync_ram.sv $root/rtl/online_softmax.sv $root/rtl/attention_top.sv \
   $root/fpga/sync2ff.sv $root/fpga/heartbeat.sv $root/fpga/uart_rx.sv $root/fpga/uart_tx.sv \
-  $root/fpga/exp_lut_2p_xilinx.sv $root/fpga/attn_uart_top.sv $root/fpga/nexys_a7_top.sv]
+  $root/fpga/exp_lut_1p_xilinx.sv $root/fpga/attn_uart_top.sv $root/fpga/nexys_a7_top.sv]
 read_mem $root/fpga/exp_lut.mem
 read_xdc $root/fpga/$xdc
 

@@ -35,15 +35,15 @@ if [[ $module == matmul_tile ]]; then
     sources=("$root/rtl_rebuild/mac_unit.sv" "${sources[@]}")
 fi
 if [[ $module == online_softmax ]]; then
-    rom="$root/rtl_rebuild/exp_lut_2p.sv"
+    rom="$root/rtl_rebuild/exp_lut_1p.sv"
     if [[ ! -f $rom ]]; then
         if [[ $pipe_rom == 1 ]]; then
-            echo "PIPE_ROM=1 requires rtl_rebuild/exp_lut_2p.sv" >&2
+            echo "PIPE_ROM=1 requires rtl_rebuild/exp_lut_1p.sv" >&2
             exit 2
         fi
-        rom="$root/rtl/exp_lut_2p.sv"
+        rom="$root/rtl/exp_lut_1p.sv"
     fi
-    [[ -f $rom ]] || { echo "Missing exp_lut_2p.sv" >&2; exit 2; }
+    [[ -f $rom ]] || { echo "Missing exp_lut_1p.sv" >&2; exit 2; }
     sources=("$rom" "${sources[@]}")
 fi
 

@@ -1,0 +1,301 @@
+
+15. Printing statistics.
+
+=== $paramod$3986f28c4b0b5cc91cb9e521798c4ddce6288fcb\uart_rx ===
+
+        +----------Local Count, excluding submodules.
+        | 
+       76 wires
+      155 wire bits
+       12 public wires
+       38 public wire bits
+        5 ports
+       12 port bits
+       84 cells
+        4   CARRY4
+       32   FDRE
+        3   FDSE
+        2   INV
+       13   LUT2
+        7   LUT3
+        7   LUT4
+        8   LUT5
+        8   LUT6
+
+=== $paramod$3986f28c4b0b5cc91cb9e521798c4ddce6288fcb\uart_tx ===
+
+        +----------Local Count, excluding submodules.
+        | 
+       75 wires
+      145 wire bits
+       10 public wires
+       38 public wire bits
+        6 ports
+       13 port bits
+       64 cells
+        4   CARRY4
+       15   FDRE
+        9   FDSE
+        5   INV
+        8   LUT2
+        9   LUT3
+        5   LUT4
+        8   LUT5
+        1   LUT6
+
+=== $paramod$3bc6865b254e8c87a506f002eb6312f25d78ff99\sync_ram ===
+
+        +----------Local Count, excluding submodules.
+        | 
+      168 wires
+      447 wire bits
+        8 public wires
+      287 public wire bits
+        8 ports
+      287 port bits
+      192 cells
+      128   FDRE
+       16   LUT2
+       48   RAM64M
+
+=== $paramod$e39f9df495434d76a8af759ce76c779c29605331\sync_ram ===
+
+        +----------Local Count, excluding submodules.
+        | 
+       14 wires
+       95 wire bits
+        8 public wires
+       87 public wire bits
+        8 ports
+       87 port bits
+        5 cells
+        4   LUT2
+        1   RAMB18E1
+
+=== $paramod\attention_top\PIPE_ROM=1'1\PV_SPLIT=1'0 ===
+
+        +----------Local Count, excluding submodules.
+        | 
+    16040 wires
+    32869 wire bits
+      292 public wires
+     6968 public wire bits
+       13 ports
+       83 port bits
+    12449 cells
+      839   CARRY4
+       64   DSP48E1
+     3906   FDRE
+      575   INV
+        4   LUT1
+     1871   LUT2
+      621   LUT3
+     1265   LUT4
+     1371   LUT5
+     1920   LUT6
+        9   MUXF7
+        4   MUXF8
+        9 submodules
+        2   $paramod$3bc6865b254e8c87a506f002eb6312f25d78ff99\sync_ram
+        2   $paramod$e39f9df495434d76a8af759ce76c779c29605331\sync_ram
+        4   $paramod\online_softmax\PIPE_ROM=1'1
+        1   matmul_tile
+
+=== $paramod\heartbeat\CLK_HZ=32'00000101111101011110000100000000 ===
+
+        +----------Local Count, excluding submodules.
+        | 
+       66 wires
+      107 wire bits
+        4 public wires
+       29 public wire bits
+        3 ports
+        3 port bits
+       46 cells
+        7   CARRY4
+       27   FDRE
+        1   INV
+        5   LUT2
+        1   LUT3
+        1   LUT4
+        4   LUT6
+
+=== $paramod\online_softmax\PIPE_ROM=1'1 ===
+
+        +----------Local Count, excluding submodules.
+        | 
+      440 wires
+      675 wire bits
+       14 public wires
+      112 public wire bits
+       10 ports
+       93 port bits
+      269 cells
+       19   CARRY4
+        1   DSP48E1
+       75   FDRE
+        1   FDSE
+        1   INV
+      108   LUT2
+       56   LUT3
+        3   LUT4
+        4   LUT5
+        1   LUT6
+        1 submodules
+        1   exp_lut_1p
+
+=== $paramod\sync2ff\WIDTH=s32'00000000000000000000000000000001\RST_VAL=1'0 ===
+
+        +----------Local Count, excluding submodules.
+        | 
+        6 wires
+        6 wire bits
+        6 public wires
+        6 public wire bits
+        4 ports
+        4 port bits
+        2 cells
+        2   FDRE
+
+=== $paramod\sync2ff\WIDTH=s32'00000000000000000000000000000001\RST_VAL=1'1 ===
+
+        +----------Local Count, excluding submodules.
+        | 
+        6 wires
+        6 wire bits
+        6 public wires
+        6 public wire bits
+        4 ports
+        4 port bits
+        2 cells
+        2   FDSE
+
+=== attn_uart_top ===
+
+        +----------Local Count, excluding submodules.
+        | 
+      136 wires
+      391 wire bits
+       24 public wires
+      131 public wire bits
+        5 ports
+        5 port bits
+      173 cells
+        1   BUFG
+        3   CARRY4
+       71   FDRE
+        1   FDSE
+        3   IBUF
+        5   INV
+       15   LUT2
+        7   LUT3
+        8   LUT4
+       46   LUT5
+       11   LUT6
+        2   OBUF
+        6 submodules
+        1   $paramod$3986f28c4b0b5cc91cb9e521798c4ddce6288fcb\uart_rx
+        1   $paramod$3986f28c4b0b5cc91cb9e521798c4ddce6288fcb\uart_tx
+        1   $paramod\attention_top\PIPE_ROM=1'1\PV_SPLIT=1'0
+        1   $paramod\heartbeat\CLK_HZ=32'00000101111101011110000100000000
+        1   $paramod\sync2ff\WIDTH=s32'00000000000000000000000000000001\RST_VAL=1'0
+        1   $paramod\sync2ff\WIDTH=s32'00000000000000000000000000000001\RST_VAL=1'1
+
+=== exp_lut_1p ===
+
+        +----------Local Count, excluding submodules.
+        | 
+       10 wires
+      174 wire bits
+        5 public wires
+       29 public wire bits
+        5 ports
+       29 port bits
+        2 cells
+        1   LUT2
+        1   RAMB18E1
+
+=== mac_unit ===
+
+        +----------Local Count, excluding submodules.
+        | 
+      185 wires
+      270 wire bits
+        7 public wires
+       44 public wire bits
+        7 ports
+       44 port bits
+       73 cells
+        1   DSP48E1
+       24   FDRE
+       24   LUT2
+       24   LUT3
+
+=== matmul_tile ===
+
+        +----------Local Count, excluding submodules.
+        | 
+       23 wires
+      836 wire bits
+       23 public wires
+      836 public wire bits
+        7 ports
+      452 port bits
+       16 submodules
+       16   mac_unit
+
+=== design hierarchy ===
+
+        +----------Count including submodules.
+        | 
+    15466 attn_uart_top
+       84 $paramod$3986f28c4b0b5cc91cb9e521798c4ddce6288fcb\uart_rx
+       64 $paramod$3986f28c4b0b5cc91cb9e521798c4ddce6288fcb\uart_tx
+    12449 $paramod\attention_top\PIPE_ROM=1'1\PV_SPLIT=1'0
+      192   $paramod$3bc6865b254e8c87a506f002eb6312f25d78ff99\sync_ram
+        5   $paramod$e39f9df495434d76a8af759ce76c779c29605331\sync_ram
+      269   $paramod\online_softmax\PIPE_ROM=1'1
+        2     exp_lut_1p
+       73     mac_unit
+       46 $paramod\heartbeat\CLK_HZ=32'00000101111101011110000100000000
+        2 $paramod\sync2ff\WIDTH=s32'00000000000000000000000000000001\RST_VAL=1'0
+        2 $paramod\sync2ff\WIDTH=s32'00000000000000000000000000000001\RST_VAL=1'1
+
+        +----------Count including submodules.
+        | 
+    21552 wires
+    43315 wire bits
+      597 public wires
+    10068 public wire bits
+      251 ports
+     2516 port bits
+        - memories
+        - memory bits
+        - processes
+    15466 cells
+        1   BUFG
+      933   CARRY4
+       84   DSP48E1
+     4993   FDRE
+       19   FDSE
+        3   IBUF
+      592   INV
+        4   LUT1
+     2772   LUT2
+     1253   LUT3
+     1298   LUT4
+     1449   LUT5
+     1948   LUT6
+        9   MUXF7
+        4   MUXF8
+        2   OBUF
+       96   RAM64M
+        6   RAMB18E1
+        6 submodules
+        1   $paramod$3986f28c4b0b5cc91cb9e521798c4ddce6288fcb\uart_rx
+        1   $paramod$3986f28c4b0b5cc91cb9e521798c4ddce6288fcb\uart_tx
+        1   $paramod\attention_top\PIPE_ROM=1'1\PV_SPLIT=1'0
+        1   $paramod\heartbeat\CLK_HZ=32'00000101111101011110000100000000
+        1   $paramod\sync2ff\WIDTH=s32'00000000000000000000000000000001\RST_VAL=1'0
+        1   $paramod\sync2ff\WIDTH=s32'00000000000000000000000000000001\RST_VAL=1'1
+

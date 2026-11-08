@@ -1,0 +1,33 @@
+attention_top functional coverage report
+seed: 1034899608486472883097817997833143402933999004053
+TOTAL: 22/22 reachable bins hit (100.0%), 0 documented-unreachable, 22 bins defined
+
+[n_len] 8/8 reachable bins hit (100.0%), 0 documented-unreachable
+    HIT         n_len.n_4                          hits=4
+    HIT         n_len.n_8                          hits=14
+    HIT         n_len.n_12                         hits=1
+    HIT         n_len.n_16                         hits=4
+    HIT         n_len.n_20                         hits=1
+    HIT         n_len.n_32                         hits=2
+    HIT         n_len.n_36                         hits=1
+    HIT         n_len.n_64                         hits=2
+[control] 4/4 reachable bins hit (100.0%), 0 documented-unreachable
+    HIT         control.back_to_back_runs_no_reset   hits=1
+    HIT         control.rst_mid_run                  hits=1
+    HIT         control.start_while_busy_ignored     hits=1
+    HIT         control.sel3_write_ignored           hits=1
+[data] 8/8 reachable bins hit (100.0%), 0 documented-unreachable
+    HIT         data.input_all_zero               hits=1
+    HIT         data.input_all_max                hits=1
+    HIT         data.input_all_min                hits=1
+    HIT         data.input_v_extremes             hits=3
+    HIT         data.output_eq_127                hits=1
+    HIT         data.output_eq_m128               hits=1
+    HIT         data.output_negative              hits=26
+    HIT         data.output_positive              hits=26
+[readback] 2/2 reachable bins hit (100.0%), 0 documented-unreachable
+    HIT         readback.random_order_readback        hits=1
+    HIT         readback.repeated_read_stable         hits=1
+
+Unhit reachable bins (coverage gap, should be empty at closure):
+  (none)
