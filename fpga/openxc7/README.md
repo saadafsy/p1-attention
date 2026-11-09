@@ -18,7 +18,12 @@ Nothing here has been run on a board. The bitstream is untested in hardware,
 and the timing numbers come from nextpnr's timing model, not from Vivado or a
 bench measurement.
 
-## Result (2026-11-08, seed 1)
+## Result (2026-11-08, seed 1, RTL before the drain-control prefetch of 86d497c)
+
+Builds of the current RTL on 2026-11-08/09 ran while other jobs loaded the
+machine. Their placement estimates were 77 to 88 MHz across three seeds, but
+none finished routing within its time limit, so the figures below are the
+latest complete post-route result.
 
 - Post-route `clk` (MMCM output, 100 MHz target): 78.22 MHz, FAIL. The
   critical path is 12.78 ns, of which 10.36 ns is routing: out_wr_row through
