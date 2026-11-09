@@ -13,7 +13,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 design="${1:?usage: run_orfs.sh <design>}"
 [[ -f "$ROOT/pd/$design/config.mk" ]] || { echo "no pd/$design/config.mk"; exit 1; }
-DOCKER="${DOCKER:-$(command -v docker || echo /mnt/c/Users/Owner/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe)}"
+# docker on PATH if it reaches a daemon, else Docker Desktop's CLI from WSL.
+if [[ -z "${DOCKER:-}" ]]; then
+  DOCKER=/mnt/c/Users/Owner/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe
+  if command -v docker >/dev/null && docker version >/dev/null 2>&1; then DOCKER=docker; fi
+fi
 IMAGE="${IMAGE:-openroad/orfs:latest}"
 run="${RUN:-$design}"
 name="orfs_${run}_$$"
