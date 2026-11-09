@@ -30,7 +30,9 @@ flowchart LR
 |---|---|
 | Accuracy | every output within 1 LSB of float64 attention; 93 to 98% exactly equal to the rounded float answer (scripts/accuracy.py) |
 | Throughput | 19.9 MAC/cycle at N = 64 (62% of the 32 MAC units), 6593 cycles per inference |
-| Timing, sky130 (pre-layout STA, 10 ns target) | whole engine about 93 MHz (-0.72 ns); online_softmax 100 MHz (+0.51 ns); MAC tile +3.4 ns |
+| Timing, sky130 (pre-layout STA, 10 ns target) | whole engine about 94 MHz (-0.62 ns); online_softmax 100 MHz (+0.51 ns); MAC tile +3.4 ns |
+| Place and route, sky130 (OpenROAD, 10 ns) | online_softmax 117.9 MHz and matmul_tile 142.2 MHz signoff, 0 DRC, 0 antenna, 0 slew/cap; whole engine with 4 OpenRAM SRAM macros routed to GDS but not signed off (power grid shorts at the macro pads, -1.32 ns), see [pd/README.md](pd/README.md) |
+| SRAM macros | macro-backed memory proven equivalent to the flop RAM in simulation (unit compare and the full engine suite, 11/11) |
 | FPGA (Artix-7, synthesis only) | 84 DSP48, 6 RAMB18, about 8.7k LUTs: fits a Basys 3 |
 | Verification | cocotb vs the golden model for every module, line + functional coverage gates, SymbiYosys proofs, gate-level simulation of the sky130 netlists, a UVM environment for the tile |
 
@@ -61,6 +63,7 @@ make model-check                       # golden models agree, LUT pinned
 make verify MODULE=online_softmax      # lint, sim vs golden, coverage, synth check, formal
 make verify MODULE=attention_top
 make sta-top                           # whole-engine sky130 timing summary
+bash pd/run_orfs.sh online_softmax     # place and route (Docker, openroad/orfs)
 python3 scripts/accuracy.py            # accuracy vs float64 + throughput table
 bash scripts/fpga_resources.sh         # Artix-7 resource count
 ```
@@ -72,6 +75,7 @@ rtl/       design: mac_unit, matmul_tile, online_softmax, exp_lut_1p, sync_ram, 
 model/     bit-exact golden model (Python and C++) and the exp LUT
 tb/        cocotb testbenches per module, gate-level sim, UVM env, VHDL cross-check
 formal/    SymbiYosys setups
+pd/        OpenROAD place-and-route configs (blocks and the SRAM-macro engine)
 fpga/      Basys 3 / Nexys A7 tops, UART protocol wrapper, host script, Vivado scripts
 scripts/   gates (coverage, claim audit), STA flow, accuracy, resource count
 docs/      uarch.md (spec), benchmark.md, guide.md (long walkthrough), design_rules.md
