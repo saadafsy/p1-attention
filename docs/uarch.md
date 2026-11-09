@@ -1015,3 +1015,44 @@ attention_top (rtl/attention_top.sv):
   copies are marked keep (and the netlist flow sets keep on their flops)
   so synthesis does not merge them back. The FORMAL block asserts every
   copy equals the original (lane_out_valid, row) on every cycle.
+
+### 8.5 sky130 SRAM macros for the memories (2026-11-09)
+
+For the ASIC layout (pd/attention_top) the four sync_ram instances become
+OpenRAM sky130 macros. rtl/sram/sync_ram_macro.sv replaces rtl/sync_ram.sv
+in that build and forwards to rtl/sram/sync_ram_sky130.sv; attention_top
+itself is unchanged.
+
+| RAM    | Logical  | Macro                        | Used                       |
+|--------|----------|------------------------------|----------------------------|
+| Q, K   | 256 x 32 | sky130_sram_1rw1r_64x256_8   | data bits 31:0, mask 3:0   |
+| V, out | 64 x 128 | sky130_sram_1rw1r_128x256_8  | words 0..63 (addr 7:6 = 0) |
+
+- Port use: port 0 (read/write) only writes, selected when we and some be
+  bit are set; port 1 (read only) reads raddr every cycle, as sync_ram
+  does. Unused data inputs and address bits are tied to 0 and unused mask
+  bits are off, so the unused columns and words are never written or read.
+- Q and K use half of a 64-bit macro. The macro set has no 32-bit word
+  with 256 words, and packing Q and K into one macro would need two read
+  ports plus a write port.
+- Reset: the macro has no reset. A flop rd_ok (cleared by rst) forces
+  rdata to 0 on the cycle after a reset cycle, which is exactly sync_ram's
+  reset of its read register.
+- Read during write: sync_ram returns the old data when raddr = waddr in
+  a write cycle. On the macro that read is undefined (OpenRAM gives no
+  guarantee). attention_top never uses such a read: Q, K and V are written
+  only by the host before start, and out is read by the host only after
+  done. In the regression the collisions that do happen (host writes while
+  the idle read address points at the same word, and divider writes while
+  rd_addr points at that row) return a poison value in simulation, and
+  every test still matches the model.
+- Timing: the macro liberty launches dout from the falling clock edge, so
+  the read data has about half a period to reach the next flop
+  (q_flat, k_flat into the MACs and drain_buf; out into rd_data).
+
+Simulation proof (tb/attention_top_sram, tb/sync_ram_sky130,
+tb/sram_models): the vendor OpenRAM Verilog model runs behind a shim that
+fixes its zero-delay races and poisons undefined reads. The attention_top
+tests run unchanged except that rd_data is sampled late in the cycle
+(the macro's data is not valid at the falling edge). Results are in
+EVIDENCE.md and pd/README.md.
