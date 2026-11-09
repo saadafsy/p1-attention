@@ -1,0 +1,135 @@
+rm -f results_sram_p1.xml
+"make" -f Makefile results_sram_p1.xml
+make[1]: Entering directory '/home/saad/p1-wt-sram/tb/attention_top_sram'
+mkdir -p sim_build_sram_p1
+/home/saad/oss-cad-suite/bin/verilator -cc --exe -Mdir sim_build_sram_p1 --top-module attention_top --timescale 1ns/1ps --vpi --public-flat-rw --prefix Vtop -o Vtop -LDFLAGS "-Wl,-rpath,/home/saad/venv/lib/python3.12/site-packages/cocotb/libs -L/home/saad/venv/lib/python3.12/site-packages/cocotb/libs -lcocotbvpi_verilator" -GPIPE_ROM=1 +incdir+/home/saad/p1-wt-sram/tb/attention_top_sram/../.. --timing --timescale 1ns/1ps /home/saad/p1-wt-sram/tb/attention_top_sram/../../rtl/mac_unit.sv /home/saad/p1-wt-sram/tb/attention_top_sram/../../rtl/matmul_tile.sv /home/saad/p1-wt-sram/tb/attention_top_sram/../../rtl/exp_lut_1p.sv /home/saad/p1-wt-sram/tb/attention_top_sram/../sram_models/models.vlt /home/saad/p1-wt-sram/tb/attention_top_sram/../../rtl/sram/sync_ram_macro.sv /home/saad/p1-wt-sram/tb/attention_top_sram/../../rtl/sram/sync_ram_sky130.sv /home/saad/p1-wt-sram/tb/attention_top_sram/../sram_models/sky130_sram_sim.sv /home/saad/p1-wt-sram/tb/attention_top_sram/../sram_models/sky130_sram_1rw1r_64x256_8_model.v /home/saad/p1-wt-sram/tb/attention_top_sram/../sram_models/sky130_sram_1rw1r_128x256_8_model.v /home/saad/p1-wt-sram/tb/attention_top_sram/../../rtl/online_softmax.sv /home/saad/p1-wt-sram/tb/attention_top_sram/../../rtl/attention_top.sv /home/saad/venv/lib/python3.12/site-packages/cocotb/share/lib/verilator/verilator.cpp
+- V e r i l a t i o n   R e p o r t: Verilator 5.053 devel rev v5.052-647-gb1b0142e7 (mod)
+- Verilator: Built from 0.667 MB sources in 14 modules, into 1.866 MB in 8 C++ files needing 0.000 MB
+- Verilator: Walltime 0.835 s (elab=0.106, cvt=0.598, bld=0.000); cpu 0.833 s on 1 threads; allocated 34.082 MB
+make -C sim_build_sram_p1  -f Vtop.mk
+make[2]: Entering directory '/home/saad/p1-wt-sram/tb/attention_top_sram/sim_build_sram_p1'
+g++  -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -Os  -c -o verilator.o /home/saad/venv/lib/python3.12/site-packages/cocotb/share/lib/verilator/verilator.cpp
+g++ -Os  -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -c -o verilated.o /home/saad/oss-cad-suite/share/verilator/include/verilated.cpp
+g++ -Os  -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -c -o verilated_dpi.o /home/saad/oss-cad-suite/share/verilator/include/verilated_dpi.cpp
+g++ -Os  -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -c -o verilated_vpi.o /home/saad/oss-cad-suite/share/verilator/include/verilated_vpi.cpp
+g++ -Os  -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -c -o verilated_timing.o /home/saad/oss-cad-suite/share/verilator/include/verilated_timing.cpp
+g++ -Os  -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -c -o verilated_threads.o /home/saad/oss-cad-suite/share/verilator/include/verilated_threads.cpp
+g++ -Os  -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -c -x c++-header Vtop__pch.h -o Vtop__pch.h.fast.gch
+g++ -Os  -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -include Vtop__pch.h.fast -c Vtop.cpp
+g++ -Os  -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -include Vtop__pch.h.fast -c Vtop___024root__0.cpp
+g++ -Os  -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -include Vtop__pch.h.fast -c Vtop___024root__1.cpp
+g++ -Os  -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -include Vtop__pch.h.fast -c Vtop__Dpi.cpp
+g++   -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -c -x c++-header Vtop__pch.h -o Vtop__pch.h.slow.gch
+g++   -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -include Vtop__pch.h.slow -c Vtop__ConstPool__0__Slow.cpp
+g++   -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -include Vtop__pch.h.slow -c Vtop___024root__Slow.cpp
+g++   -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -include Vtop__pch.h.slow -c Vtop___024root__0__Slow.cpp
+g++   -I.  -MMD -I/home/saad/oss-cad-suite/share/verilator/include -I/home/saad/oss-cad-suite/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=1 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=1 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable  -DVM_PREFIX_INCLUDE="<Vtop.h>" -DVM_PREFIX_INCLUDE_DPI="<Vtop__Dpi.h>"     -fcoroutines -include Vtop__pch.h.slow -c Vtop__Syms__Slow.cpp
+g++    -rdynamic verilator.o verilated.o verilated_dpi.o verilated_vpi.o verilated_timing.o verilated_threads.o Vtop__ALL.a   -Wl,-rpath,/home/saad/venv/lib/python3.12/site-packages/cocotb/libs -L/home/saad/venv/lib/python3.12/site-packages/cocotb/libs -lcocotbvpi_verilator  -pthread -lpthread -latomic -ldl   -o Vtop
+rm Vtop__ALL.verilator_deplist.tmp
+make[2]: Leaving directory '/home/saad/p1-wt-sram/tb/attention_top_sram/sim_build_sram_p1'
+rm -f results_sram_p1.xml
+COCOTB_TEST_MODULES=test_attention_top_sram COCOTB_TESTCASE= COCOTB_TEST_FILTER= COCOTB_TOPLEVEL=attention_top TOPLEVEL_LANG=verilog \
+         sim_build_sram_p1/Vtop  -GPIPE_ROM=1 +incdir+/home/saad/p1-wt-sram/tb/attention_top_sram/../.. --timing --timescale 1ns/1ps   
+     -.--ns INFO     gpi                                ..mbed/gpi_embed.cpp:93   in _embed_init_python              Using Python 3.12.4 interpreter at /home/saad/venv/bin/python3
+     -.--ns INFO     gpi                                ../gpi/GpiCommon.cpp:79   in gpi_print_registered_impl       VPI registered
+     0.00ns INFO     cocotb                             Running on Verilator version 5.053 devel
+     0.00ns INFO     cocotb                             Seeding Python random module with supplied seed 1
+     0.00ns INFO     cocotb                             Initialized cocotb v2.0.1 from /home/saad/venv/lib/python3.12/site-packages/cocotb
+     0.00ns INFO     cocotb                             Running tests
+     0.00ns INFO     cocotb.regression                  running test_attention_top.end_to_end_golden (1/11)
+                                                            One random case per n in 4..64; writes the n vs cycle_count table to cycles.txt.
+  4339.50ns INFO     cocotb.attention_top               end_to_end_golden: n=4 cycle_count=173
+ 13239.50ns INFO     cocotb.attention_top               end_to_end_golden: n=8 cycle_count=377
+ 32299.50ns INFO     cocotb.attention_top               end_to_end_golden: n=16 cycle_count=881
+ 75519.50ns INFO     cocotb.attention_top               end_to_end_golden: n=32 cycle_count=2273
+182419.50ns INFO     cocotb.attention_top               end_to_end_golden: n=64 cycle_count=6593
+182419.50ns INFO     cocotb.attention_top               n-vs-cycle_count table: [(4, 173), (8, 377), (16, 881), (32, 2273), (64, 6593)]
+182419.50ns INFO     cocotb.regression                  test_attention_top.end_to_end_golden passed
+182419.50ns INFO     cocotb.regression                  running test_attention_top.corners (2/11)
+                                                            All-zero, all-max, all-min, V extremes, and the monotonic max-update case.
+237119.00ns INFO     cocotb.regression                  test_attention_top.corners passed
+237119.00ns INFO     cocotb.regression                  running test_attention_top.multi_run_no_reset (3/11)
+                                                            Two runs back to back without reset: start alone must reinitialize all state.
+254958.50ns INFO     cocotb.regression                  test_attention_top.multi_run_no_reset passed
+254958.50ns INFO     cocotb.regression                  running test_attention_top.rst_mid_run (4/11)
+                                                            Reset 300 cycles into an n=64 run, check idle, then a clean run.
+297678.00ns INFO     cocotb.regression                  test_attention_top.rst_mid_run passed
+297678.00ns INFO     cocotb.regression                  running test_attention_top.random_regression (5/11)
+                                                            10 seeded-random cases at random n in {4,8,16,32,64}.
+515397.50ns INFO     cocotb.regression                  test_attention_top.random_regression passed
+515397.50ns INFO     cocotb.regression                  running test_attention_top.write_port_readback (6/11)
+                                                            Shuffled-address writes; repeated and random-order output reads.
+524357.01ns INFO     cocotb.regression                  test_attention_top.write_port_readback passed
+524357.01ns INFO     cocotb.regression                  running test_attention_top.nonpow2_group_counts (7/11)
+                                                            n_len 12/20/36 (nblk 3/5/9) exercise the nblk_m1 compares and odd rollover.
+612896.51ns INFO     cocotb.regression                  test_attention_top.nonpow2_group_counts passed
+612896.51ns INFO     cocotb.regression                  running test_attention_top.start_while_busy_ignored (8/11)
+                                                            A start (with a different n_len) during a run is ignored.
+631996.01ns INFO     cocotb.regression                  test_attention_top.start_while_busy_ignored passed
+631996.01ns INFO     cocotb.regression                  running test_attention_top.sel3_write_ignored (9/11)
+                                                            Writes with sel = 3 (no-write encoding) must not change any matrix.
+642225.51ns INFO     cocotb.regression                  test_attention_top.sel3_write_ignored passed
+642225.51ns INFO     cocotb.regression                  running test_attention_top.test_zz_coverage_closure (10/11)
+                                                            Last test (cocotb runs in file order): write the coverage report, fail on any miss.
+642225.51ns INFO     cocotb.attention_top               
+                                                        attention_top functional coverage report
+                                                        seed: 1034899608486472883097817997833143402933999004053
+                                                        TOTAL: 22/22 reachable bins hit (100.0%), 0 documented-unreachable, 22 bins defined
+                                                        
+                                                        [n_len] 8/8 reachable bins hit (100.0%), 0 documented-unreachable
+                                                            HIT         n_len.n_4                          hits=4
+                                                            HIT         n_len.n_8                          hits=14
+                                                            HIT         n_len.n_12                         hits=1
+                                                            HIT         n_len.n_16                         hits=4
+                                                            HIT         n_len.n_20                         hits=1
+                                                            HIT         n_len.n_32                         hits=2
+                                                            HIT         n_len.n_36                         hits=1
+                                                            HIT         n_len.n_64                         hits=2
+                                                        [control] 4/4 reachable bins hit (100.0%), 0 documented-unreachable
+                                                            HIT         control.back_to_back_runs_no_reset   hits=1
+                                                            HIT         control.rst_mid_run                  hits=1
+                                                            HIT         control.start_while_busy_ignored     hits=1
+                                                            HIT         control.sel3_write_ignored           hits=1
+                                                        [data] 8/8 reachable bins hit (100.0%), 0 documented-unreachable
+                                                            HIT         data.input_all_zero               hits=1
+                                                            HIT         data.input_all_max                hits=1
+                                                            HIT         data.input_all_min                hits=1
+                                                            HIT         data.input_v_extremes             hits=3
+                                                            HIT         data.output_eq_127                hits=1
+                                                            HIT         data.output_eq_m128               hits=1
+                                                            HIT         data.output_negative              hits=26
+                                                            HIT         data.output_positive              hits=26
+                                                        [readback] 2/2 reachable bins hit (100.0%), 0 documented-unreachable
+                                                            HIT         readback.random_order_readback        hits=1
+                                                            HIT         readback.repeated_read_stable         hits=1
+                                                        
+                                                        Unhit reachable bins (coverage gap, should be empty at closure):
+                                                          (none)
+642225.51ns INFO     cocotb.regression                  test_attention_top.test_zz_coverage_closure passed
+642225.51ns INFO     cocotb.regression                  running test_attention_top_sram.test_zzz_collision_count (11/11)
+                                                            Report same-address read-during-write cycles (their reads are poisoned).
+642225.51ns INFO     cocotb.attention_top               read-during-write collisions per RAM: {'u_qmem': 108, 'u_kmem': 108, 'u_vmem': 240, 'u_outmem': 26}
+642225.51ns INFO     cocotb.regression                  test_attention_top_sram.test_zzz_collision_count passed
+642225.51ns INFO     cocotb.regression                  **********************************************************************************************************
+                                                        ** TEST                                              STATUS  SIM TIME (ns)  REAL TIME (s)  RATIO (ns/s) **
+                                                        **********************************************************************************************************
+                                                        ** test_attention_top.end_to_end_golden               PASS      182419.50           1.52     119947.70  **
+                                                        ** test_attention_top.corners                         PASS       54699.50           0.38     143706.62  **
+                                                        ** test_attention_top.multi_run_no_reset              PASS       17839.50           0.12     150913.83  **
+                                                        ** test_attention_top.rst_mid_run                     PASS       42719.50           0.32     133363.13  **
+                                                        ** test_attention_top.random_regression               PASS      217719.50           1.59     137296.74  **
+                                                        ** test_attention_top.write_port_readback             PASS        8959.50           0.08     110202.92  **
+                                                        ** test_attention_top.nonpow2_group_counts            PASS       88539.50           0.74     119610.51  **
+                                                        ** test_attention_top.start_while_busy_ignored        PASS       19099.50           0.12     160026.83  **
+                                                        ** test_attention_top.sel3_write_ignored              PASS       10229.50           0.06     167490.87  **
+                                                        ** test_attention_top.test_zz_coverage_closure        PASS           0.00           0.01          0.00  **
+                                                        ** test_attention_top_sram.test_zzz_collision_count   PASS           0.00           0.00          0.00  **
+                                                        **********************************************************************************************************
+                                                        ** TESTS=11 PASS=11 FAIL=0 SKIP=0                               642225.51           4.95     129620.01  **
+                                                        **********************************************************************************************************
+- (null):0: Verilog $finish
+attention_top.u_outmem.u_ram.g_m128.u_sram.u_shim: 26 same-address read-during-write cycles
+attention_top.u_vmem.u_ram.g_m128.u_sram.u_shim: 240 same-address read-during-write cycles
+attention_top.u_kmem.u_ram.g_m64.u_sram.u_shim: 108 same-address read-during-write cycles
+attention_top.u_qmem.u_ram.g_m64.u_sram.u_shim: 108 same-address read-during-write cycles
+make[1]: Leaving directory '/home/saad/p1-wt-sram/tb/attention_top_sram'
