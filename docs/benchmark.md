@@ -11,7 +11,7 @@ at the sky130 typical corner, and FPGA numbers are synthesis counts.
 | matmul_tile (4x4 MAC array) | - | +3.37 ns | ~150 MHz |
 | online_softmax | PIPE_ROM=1 (registered ROM) | +0.51 ns | 100 MHz |
 | online_softmax | PIPE_ROM=0 (single cycle) | -1.76 ns | ~85 MHz |
-| attention_top (whole engine) | PIPE_ROM=1, SRAM macros as flop boundaries | -0.72 ns | ~93 MHz |
+| attention_top (whole engine) | PIPE_ROM=1, SRAM macros as flop boundaries | -0.62 ns | ~94 MHz |
 
 Commands: `make sta MODULE=matmul_tile`, `make sta-pipe1`,
 `make synth-netlist MODULE=online_softmax && make sta MODULE=online_softmax`,
@@ -39,13 +39,13 @@ cycles = nblk * (16 * nblk + 156) + 1, nblk = N / 4 (docs/uarch.md 8.3;
 tb/attention_top checks it exactly for every run). MACs per inference are
 N^2 * D for Q.K^T plus N^2 * D for P.V.
 
-| N | cycles | MACs | MAC/cycle | of 32 MAC units | time @ 93 MHz |
+| N | cycles | MACs | MAC/cycle | of 32 MAC units | time @ 94 MHz |
 |---|--------|------|-----------|-----------------|---------------|
-| 4 | 173 | 512 | 3.0 | 9% | 1.9 us |
-| 8 | 377 | 2048 | 5.4 | 17% | 4.1 us |
-| 16 | 881 | 8192 | 9.3 | 29% | 9.5 us |
-| 32 | 2273 | 32768 | 14.4 | 45% | 24.4 us |
-| 64 | 6593 | 131072 | 19.9 | 62% | 70.9 us |
+| 4 | 173 | 512 | 3.0 | 9% | 1.8 us |
+| 8 | 377 | 2048 | 5.4 | 17% | 4.0 us |
+| 16 | 881 | 8192 | 9.3 | 29% | 9.4 us |
+| 32 | 2273 | 32768 | 14.4 | 45% | 24.1 us |
+| 64 | 6593 | 131072 | 19.9 | 62% | 70.0 us |
 
 The 32 MAC units are the 16 in the tile plus the 16 w*v columns (the 16
 acc*r rescale multipliers are overhead, not MACs). The gap to 100% is the

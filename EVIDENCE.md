@@ -100,3 +100,5 @@ VERIFY OK: attn_model
 VERIFY OK: matmul_tile
 | verify-attention_top-20261109T003149Z | attention_top passes lint/sim/cov/synth/formal | PASS | make verify MODULE=attention_top SEED=1 | 0 |
 VERIFY OK: attention_top
+| verify-attention_top-20261109T041232Z | attention_top passes lint/sim/cov/synth/formal | PASS | make verify MODULE=attention_top SEED=1 | 0 |
+VERIFY OK: attention_top

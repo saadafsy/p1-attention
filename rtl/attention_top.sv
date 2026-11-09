@@ -109,22 +109,49 @@ module attention_top #(
     endcase
   end
 
-  // Round-robin drain addressing.
-  wire [1:0] lane      = t[1:0];
-  wire [1:0] key_local = t[3:2];
-
-  logic       drain_en;
-  logic [3:0] drain_blk;   // block whose scores are being drained
+  // Round-robin drain control (lane = t[1:0], key = t[3:2]), prefetched like
+  // s_conv: computed from state_n/kb_n/t_n and registered, so each register
+  // equals the combinational value of this cycle (FORMAL checks it below).
+  // drain_blk = DRAIN_LAST ? nblk-1 : kb-1. nblk_reg only changes on an
+  // accepted start, when state_n = S_COMPUTE, so nblk_m1 is next-cycle exact.
+  logic       drain_en_n;
+  logic [3:0] drain_blk_n;
+  logic       row_start_n;
 
   always_comb begin
-    drain_en  = ((state == S_COMPUTE) && (kb != 4'd0)) || (state == S_DRAIN_LAST);
-    drain_blk = (state == S_DRAIN_LAST) ? (nblk_m1) : (kb - 4'd1);
+    drain_en_n  = ((state_n == S_COMPUTE) && (kb_n != 4'd0)) || (state_n == S_DRAIN_LAST);
+    drain_blk_n = (state_n == S_DRAIN_LAST) ? nblk_m1 : (kb_n - 4'd1);
+    row_start_n = drain_en_n && (t_n[3:2] == 2'd0) && (drain_blk_n == 4'd0);
   end
 
-  wire [5:0] drain_v_row = {drain_blk, key_local};
+  logic [5:0] drain_v_row;     // V RAM read address {drain_blk, key}
+  logic       row_start_val;   // the drained element is its row's first
+  logic       lane_in_valid  [4];
+  logic       lane_row_start [4];
 
-  logic       row_start_val;
-  always_comb row_start_val = drain_en && (key_local == 2'd0) && (drain_blk == 4'd0);
+  // Reset values are the combinational values in the reset state
+  // (S_IDLE, kb = t = 0: drain_blk = 15).
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      drain_v_row   <= 6'b111100;
+      row_start_val <= 1'b0;
+    end else begin
+      drain_v_row   <= {drain_blk_n, t_n[3:2]};
+      row_start_val <= row_start_n;
+    end
+  end
+
+  for (genvar gC = 0; gC < 4; gC++) begin : g_lane_ctl
+    always_ff @(posedge clk) begin
+      if (rst) begin
+        lane_in_valid[gC]  <= 1'b0;
+        lane_row_start[gC] <= 1'b0;
+      end else begin
+        lane_in_valid[gC]  <= drain_en_n && (t_n[1:0] == gC[1:0]);
+        lane_row_start[gC] <= row_start_n && (t_n[1:0] == gC[1:0]);
+      end
+    end
+  end
 
   // Block boundary: the finished block is captured into drain_buf.
   wire capture = (state == S_COMPUTE) && (t == 4'd15);
@@ -289,9 +316,7 @@ module attention_top #(
     else s_conv <= s_conv_n;
   end
 
-  // 4 online_softmax lanes.
-  logic        lane_in_valid  [4];
-  logic        lane_row_start [4];
+  // 4 online_softmax lanes (in_valid/row_start registered above).
   logic [15:0] lane_w  [4];
   logic [15:0] lane_r  [4];
   // verilator lint_off UNUSEDSIGNAL
@@ -305,11 +330,6 @@ module attention_top #(
   // verilator lint_on UNUSEDSIGNAL
 
   for (genvar gL = 0; gL < 4; gL++) begin : g_softmax
-    always_comb begin
-      lane_in_valid[gL]  = drain_en && (lane == gL[1:0]);
-      lane_row_start[gL] = row_start_val && (lane == gL[1:0]);
-    end
-
     online_softmax #(
         .PIPE_ROM(PIPE_ROM)
     ) u_sm (
@@ -658,6 +678,29 @@ module attention_top #(
 
   always_ff @(posedge clk) begin
     if (f_past_valid) cover (done);
+  end
+
+  // Prefetched drain control == the former combinational expressions.
+  wire [1:0] f_lane      = t[1:0];
+  wire [1:0] f_key_local = t[3:2];
+  wire       f_drain_en  = ((state == S_COMPUTE) && (kb != 4'd0)) || (state == S_DRAIN_LAST);
+  wire [3:0] f_drain_blk = (state == S_DRAIN_LAST) ? nblk_m1 : (kb - 4'd1);
+  wire       f_row_start = f_drain_en && (f_key_local == 2'd0) && (f_drain_blk == 4'd0);
+
+  always_comb begin
+    if (f_past_valid) begin
+      assert (drain_v_row == {f_drain_blk, f_key_local});
+      assert (row_start_val == f_row_start);
+    end
+  end
+
+  for (genvar fL = 0; fL < 4; fL++) begin : g_f_lane_ctl
+    always_comb begin
+      if (f_past_valid) begin
+        assert (lane_in_valid[fL] == (f_drain_en && (f_lane == fL[1:0])));
+        assert (lane_row_start[fL] == (f_row_start && (f_lane == fL[1:0])));
+      end
+    end
   end
 
   always_comb begin

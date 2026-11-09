@@ -5,7 +5,11 @@
 #   -> fasm2frames -> xc7frames2bit
 # Usage (from anywhere):  bash fpga/openxc7/build.sh
 # Env overrides: OPENXC7 (toolchain prefix, default ~/tools/openxc7),
-#   YOSYS (default: oss-cad-suite yosys), SEED (default 1), OUT (default build/openxc7).
+#   YOSYS (default: oss-cad-suite yosys), SEED (default 1), OUT (default build/openxc7),
+#   THREADS (default 6), FROM=bit (skip synth + PnR, reuse $OUT/*.fasm),
+#   CLK_MHZ (100 default, or 75: MMCM 100 MHz * 9 / 12).
+# Timing failure does not stop the build (--timing-allow-fail): the bitstream is
+# still written and summary.txt says TIMING: FAILED.
 # Outputs in $OUT: nexys_a7_top.json/.fasm/.frames/.bit, synth.log, pnr.log,
 #   report.json (nextpnr timing + utilisation), summary.txt.
 # Produces a bitstream only; nothing here touches a board.
@@ -49,7 +53,13 @@ SRCS=(rtl/mac_unit.sv rtl/matmul_tile.sv rtl/exp_lut_1p.sv rtl/sync_ram.sv
       fpga/sync2ff.sv fpga/heartbeat.sv fpga/uart_rx.sv fpga/uart_tx.sv
       fpga/attn_uart_top.sv fpga/nexys_a7_top.sv)
 cd "$ROOT"
-echo "== yosys ($("$YOSYS" -V))"
+case "${CLK_MHZ:-100}" in
+  100) ;;
+  75)  SRCS+=(fpga/openxc7/top_75mhz.sv); TOP=top_75mhz ;;  # MMCM 100 * 9 / 12
+  *)   echo "CLK_MHZ must be 100 or 75"; exit 1 ;;
+esac
+if [[ "${FROM:-}" != bit ]]; then
+echo "== yosys ($("$YOSYS" -V)), design clock ${CLK_MHZ:-100} MHz"
 "$YOSYS" -q -l "$OUT/synth.log" -p "
   read_verilog -sv -I$ROOT ${SRCS[*]};
   synth_xilinx -flatten -abc9 -arch xc7 -top $TOP;
@@ -60,7 +70,8 @@ echo "== yosys ($("$YOSYS" -V))"
 echo "== nextpnr-himbaechel (xilinx)"
 nextpnr-himbaechel --chipdb "$CHIPDB" --device "$PART" --json "$OUT/$TOP.json" \
   -o xdc="$XDC" -o fasm="$OUT/$TOP.fasm" --router router2 --seed "$SEED" --threads "${THREADS:-6}" \
-  --report "$OUT/report.json" --log "$OUT/pnr.log"
+  --timing-allow-fail --report "$OUT/report.json" --log "$OUT/pnr.log"
+fi
 
 # 4. Bitstream.
 echo "== fasm2frames + xc7frames2bit"
@@ -70,11 +81,12 @@ xc7frames2bit --part_file "$DB/$FAMILY/$PART/part.yaml" --part_name "$PART" \
 
 # 5. Summary.
 {
-  echo "openXC7 build of $TOP for $PART (Basys 3), seed $SEED"
+  echo "openXC7 build of $TOP for $PART (Basys 3), seed $SEED, design clock ${CLK_MHZ:-100} MHz"
   echo "yosys: $("$YOSYS" -V)"
   echo "nextpnr: $(nextpnr-himbaechel --version 2>&1 | head -1)"
   echo "--- post-route timing (nextpnr)"
-  grep -E "Max frequency for clock|Max delay" "$OUT/pnr.log" | tail -n 8
+  # The last report per clock is post-route; earlier ones are placement estimates.
+  grep -E "Max frequency for clock" "$OUT/pnr.log" | sed 's/^[A-Za-z]*: *//' | awk '{c[$5]=$0} END {for (k in c) print c[k]}'
   echo "--- utilisation (nextpnr)"
   sed -n '/Device utilisation:/,/^Info: *$/p' "$OUT/pnr.log" | grep -E ' [1-9][0-9]*/ *[0-9]+' || true
   echo "--- bitstream"

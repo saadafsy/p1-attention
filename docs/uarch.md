@@ -990,6 +990,14 @@ attention_top (rtl/attention_top.sv):
 - Score register: s is prefetched. Each cycle converts the element the
   next cycle drains (index from t + 1, or element 0 of drain_buf_next on
   the capture cycle) into a flop, so online_softmax sees s from a register.
+- Drain control prefetch: the per-lane in_valid and row_start, the
+  row-start flag of the PV delay lines and the V RAM read address
+  {drain_blk, key} are computed the same way, from the FSM next-state
+  values (state_n, kb_n, t_n), and registered, so the kb - 1 and
+  drain_blk == 0 logic no longer sits in front of the softmax m_base mux.
+  Each register equals the former combinational expression on every cycle
+  (reset values included); the FORMAL block asserts this against the old
+  expressions, kept there as formal-only wires.
 - PV datapath: two stages. Stage A, the out_valid cycle, forms
   acc_base * r as three partial products (r[5:0], r[11:6], r[15:12]) and
   w * v[k], and registers them; stage B forms the single sum
