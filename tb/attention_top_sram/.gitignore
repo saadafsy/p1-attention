@@ -1,0 +1,5 @@
+sim_build_*/
+results_*.xml
+run_*.log
+cycles_*.txt
+func_coverage_*.txt
