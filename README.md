@@ -9,7 +9,6 @@ score matrix is never stored), a 16-column datapath accumulates the
 weighted V rows, and a divider bank produces the int8 (Q1.6) output.
 Every result is bit-exact against a golden model.
 
-**Bit-exact to the golden model** · **19.9 MAC/cycle** · **sky130 layout with 4 SRAM macros, 79.4 MHz signoff** · **formal proofs to depth 180**
 
 | Whole engine with four SRAM macros | Online softmax | 4x4 MAC tile |
 |:---:|:---:|:---:|
@@ -18,20 +17,7 @@ Every result is bit-exact against a golden model.
 
 <sub>sky130 layouts from OpenROAD after routing, 0 DRC. Placed and routed only; not taped out.</sub>
 
-```mermaid
-flowchart LR
-    LOAD["load port<br/>Q / K / V RAMs"] --> TILE["matmul_tile<br/>4x4 x mac_unit"]
-    FSM["FSM + counters"] --> TILE
-    TILE --> DBUF["drain_buf"]
-    DBUF --> SCONV["score conversion<br/>sat16((sacc+8)>>>4)"]
-    SCONV --> SM["4 x online_softmax<br/>m, l, exp ROM"]
-    SM --> PV["PV datapath, 2 stages<br/>acc = rshr(acc*r,15) + w*v"]
-    LOAD -- "V rows" --> PV
-    PV --> ACC[("acc_num<br/>4 x 16 x Q10.21")]
-    ACC --> DIV["divider bank<br/>sat8(round(acc/l))"]
-    SM -- "l" --> DIV
-    DIV --> OUT["out RAM -> rd_data"]
-```
+![attention_top block diagram](docs/img/attention_top_block.svg)
 
 ## Results
 

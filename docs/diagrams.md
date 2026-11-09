@@ -1,88 +1,51 @@
 # Diagrams: block, dataflow, and the drain-overlaps-compute window
 
-Added 2026-09-19. The Mermaid diagrams render directly on GitHub; the
-WaveDrom timing diagram is kept as JSON source in docs/wavedrom/ and
-rendered to docs/img/ by `make diagrams` (needs node: `npx wavedrom-cli`),
-with an ASCII rendering below so the mechanism is readable without it.
-Every signal name matches rtl/attention_top.sv.
+The block diagram is a hand-drawn SVG (docs/img/attention_top_block.svg).
+The timing diagram is kept as WaveDrom JSON in docs/wavedrom/ and rendered
+to docs/img/ by `make diagrams` (needs node: `npx wavedrom-cli`), with a
+text rendering below so the mechanism is readable without it. Every signal
+name matches rtl/attention_top.sv.
 
 ## 1. Block diagram (attention_top, docs/uarch.md 8.3)
 
-```mermaid
-flowchart LR
-    subgraph LOAD["Load port (sel, addr, wdata, we)"]
-        direction TB
-        Q[("q_word_mem<br/>256 x 32<br/>col-major, 4 rows/word")]
-        K[("k_word_mem<br/>256 x 32<br/>col-major, 4 rows/word")]
-        V[("v_mem<br/>64 x 128<br/>row-major")]
-    end
+![attention_top block diagram](img/attention_top_block.svg)
 
-    FSM["FSM<br/>S_IDLE / S_COMPUTE / S_DRAIN_LAST / S_DIVIDE<br/>counters rg, kb, t, row, div_cnt<br/>prefetch rg_n/kb_n/t_n"]
+Names in the RTL, for reading alongside the picture:
 
-    TILE["matmul_tile<br/>4x4 output-stationary<br/>16 x mac_unit (ACT x ACT -> SACC)"]
-    DBUF["drain_buf<br/>384-bit capture at t=15<br/>+ d=15 outer product"]
-    SCONV["score conversion<br/>sat16((sacc+8)>>>4)<br/>rounding site 1"]
-
-    subgraph SM["4 x online_softmax (one per query row / lane)"]
-        direction TB
-        L0["lane 0: m, l, w, r"]
-        L1["lane 1"]
-        L2["lane 2"]
-        L3["lane 3"]
-    end
-
-    PV["shared PV datapath (16 columns)<br/>acc <= rshr(acc*r,15) + w*v<br/>rounding site 4"]
-    ACC[("acc_num<br/>4 lanes x 16 x NUM Q10.21")]
-    DIV["divider bank (16 x restoring)<br/>out = sat8(floor((2*acc+l)/(2*l)))<br/>rounding site 5"]
-    OUT[("out_mem<br/>64 x 128<br/>row-major")]
-    RD["rd_addr / rd_data<br/>registered read"]
-
-    Q -- "q_flat (prefetched)" --> TILE
-    K -- "k_flat (prefetched)" --> TILE
-    FSM -- "en, clr" --> TILE
-    TILE -- "acc_flat" --> DBUF
-    DBUF -- "one SACC / cycle<br/>lane=t[1:0], key=t[3:2]" --> SCONV
-    SCONV -- "s (SCORE)" --> SM
-    FSM -- "in_valid, row_start" --> SM
-    V -- "v_row_reg (1-cycle RAM latency<br/>= out_valid alignment)" --> PV
-    SM -- "w, r, out_valid (one-hot)" --> PV
-    PV <--> ACC
-    ACC --> DIV
-    SM -- "l (denominator)" --> DIV
-    DIV -- "out_we, 16 bytes/row" --> OUT
-    OUT --> RD
-    FSM -- "busy, done, cycle_count" --> RD
-```
+| Block in the picture | RTL | Notes |
+|---|---|---|
+| Q RAM, K RAM | q_word_mem, k_word_mem | 256 x 32, column-major, 4 rows per word, prefetched into q_flat / k_flat |
+| V RAM | v_mem | 64 x 128, row-major; v_row_reg gives the 1-cycle read latency that lines up with out_valid |
+| control FSM | S_IDLE, S_COMPUTE, S_DRAIN_LAST, S_DIVIDE | counters rg, kb, t, row, div_cnt; prefetch rg_n / kb_n / t_n |
+| matmul_tile | u_tile | 4x4 output-stationary, 16 mac_unit, driven by en / clr |
+| drain_buf | drain_buf | 384-bit capture at t = 15 plus the d = 15 product; one score per cycle, lane = t[1:0], key = t[3:2] |
+| score conversion | sat16((sacc+8)>>>4) | rounding site 1 |
+| online_softmax x 4 | one per query row | m, l, w, r per lane; in_valid / row_start from the FSM |
+| PV datapath | 16 shared columns | acc <= rshr(acc*r,15) + w*v, rounding site 4; acc_num is 4 lanes x 16 x Q10.21 |
+| divider bank | 16 restoring dividers | out = sat8(floor((2*acc+l)/(2*l))), rounding site 5; writes 16 bytes per row |
+| out RAM | out_mem | 64 x 128, registered read on rd_addr / rd_data |
 
 ## 2. Dataflow: what streams, what stays put
 
-```mermaid
-flowchart TB
-    subgraph GROUP["one query row group rg (4 rows), nblk = n_len/4 key blocks"]
-        direction LR
-        subgraph B0["block kb = 0<br/>S_COMPUTE, 16 cycles"]
-            C0["tile: acc(i,j) += q_i[d] * k_j[d], d = 0..15<br/>Q rows 4rg..4rg+3 broadcast across columns<br/>K rows 0..3 broadcast down rows<br/>partial sums STAY in the 16 accumulators"]
-        end
-        subgraph B1["block kb = 1<br/>S_COMPUTE, 16 cycles"]
-            C1["tile: block 1 accumulates"]
-            D0["drain block 0 from drain_buf:<br/>t=0..15 -> (lane t mod 4, key t div 4)<br/>each lane sees its 4 keys in ascending order"]
-        end
-        subgraph BL["S_DRAIN_LAST, 16 cycles"]
-            DL["drain block nblk-1<br/>(no next block to overlap)"]
-        end
-        subgraph DV["S_DIVIDE, 4 x 35 cycles"]
-            DD["row 0..3: load |2*acc+l|, 33 restoring steps, write out_mem"]
-        end
-    end
-    B0 -- "t=15 edge: drain_buf <= acc(d0..14) + q*k(d15)" --> B1
-    B1 -- "..." --> BL
-    BL --> DV
-    DV -- "next group: rg+1, kb=0" --> B0
+One query row group rg (4 rows), nblk = n_len/4 key blocks:
 
-    style C0 fill:#eef,stroke:#446
-    style D0 fill:#efe,stroke:#464
-    style DL fill:#efe,stroke:#464
 ```
+state         S_COMPUTE      S_COMPUTE           ...  S_DRAIN_LAST      S_DIVIDE
+block         kb = 0         kb = 1                   (no new block)    rows 0..3
+cycles        16             16                       16                4 x 35
+tile          accumulates 0  accumulates 1             idle              idle
+drain         -              drains block 0            drains nblk-1     -
+divider       -              -                         -                 |2*acc+l|, 33 steps,
+                                                                         write out_mem
+then: rg + 1, kb = 0, back to S_COMPUTE
+```
+
+At the t = 15 edge of each block: drain_buf <= acc(d0..14) + q*k(d15).
+In block kb the tile computes acc(i,j) += q_i[d] * k_j[d] for d = 0..15,
+with Q rows 4rg..4rg+3 broadcast across columns and K rows broadcast
+down rows; the partial sums stay in the 16 accumulators. The drain of
+block kb-1 feeds lane t mod 4, key t div 4, so each lane sees its 4 keys
+in ascending order.
 
 Output-stationary in one sentence: the 16 partial sums never move
 between PEs; Q and K elements stream past them for 16 cycles and the
