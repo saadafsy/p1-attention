@@ -5,8 +5,6 @@ runs:
   steps:
     - name: Install OSS CAD Suite (pinned by date)
       shell: bash
-      env:
-        OSS_CAD_SHA256: ${{ vars.OSS_CAD_SHA256 }}
       run: |
         set -euo pipefail
         url="https://github.com/YosysHQ/oss-cad-suite-build/releases/download/${OSS_CAD_TAG}/${OSS_CAD_FILE}"
@@ -23,9 +21,6 @@ runs:
 
     - name: Install verible (pinned by URL variable, else latest release)
       shell: bash
-      env:
-        VERIBLE_URL: ${{ vars.VERIBLE_URL }}
-        VERIBLE_SHA256: ${{ vars.VERIBLE_SHA256 }}
       run: |
         set -euo pipefail
         url="${VERIBLE_URL:-}"

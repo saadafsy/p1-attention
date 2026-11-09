@@ -10,8 +10,11 @@ on:
 env:
   OSS_CAD_TAG: "2026-09-18"
   OSS_CAD_FILE: "oss-cad-suite-linux-x64-20260918.tgz"
-  # Pin these after the first successful run (Settings > Variables):
-  #   OSS_CAD_SHA256, VERIBLE_URL (a release tarball), VERIBLE_SHA256
+  # Repository variables (Settings > Variables), empty until pinned after the
+  # first successful run. Read here because composite actions cannot use vars.
+  OSS_CAD_SHA256: ${{ vars.OSS_CAD_SHA256 }}
+  VERIBLE_URL: ${{ vars.VERIBLE_URL }}
+  VERIBLE_SHA256: ${{ vars.VERIBLE_SHA256 }}
   COCOTB_SPEC: "cocotb>=2.0,<2.1"
 
 jobs:
