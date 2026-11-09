@@ -7,6 +7,7 @@
 #      IMAGE (default openroad/orfs:latest), NUM_CORES (default 8),
 #      TARGET (make target, default the full flow), RUN (result name, default
 #      <design>), ORFS_VARS (extra make variables, e.g. "PLACE_DENSITY=0.5").
+# pd/<design>/prepare.sh, if present, runs in the container before the flow.
 # The repo is copied into the container (no bind mount needed); results come
 # back to build/orfs/<run>/ (logs, reports, results incl. 6_final.gds).
 set -euo pipefail
@@ -30,6 +31,7 @@ mk="make DESIGN_CONFIG=/work/pd/$design/config.mk WORK_HOME=/work/build/orfs/$ru
 "$DOCKER" create --name "$name" -w /OpenROAD-flow-scripts/flow "$IMAGE" bash -c "
   source /OpenROAD-flow-scripts/env.sh >/dev/null
   mkdir -p /work/build/orfs
+  if [ -f /work/pd/$design/prepare.sh ]; then bash /work/pd/$design/prepare.sh || exit 3; fi
   $mk NUM_CORES=${NUM_CORES:-8} ${TARGET:-} 2>&1 | tee /work/build/orfs/$run.log
   rc=\${PIPESTATUS[0]}
   [ -z '${TARGET:-}' ] && $mk metadata > /dev/null 2>&1 || true

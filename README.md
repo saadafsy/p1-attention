@@ -31,7 +31,7 @@ flowchart LR
 | Accuracy | every output within 1 LSB of float64 attention; 93 to 98% exactly equal to the rounded float answer (scripts/accuracy.py) |
 | Throughput | 19.9 MAC/cycle at N = 64 (62% of the 32 MAC units), 6593 cycles per inference |
 | Timing, sky130 (pre-layout STA, 10 ns target) | whole engine about 94 MHz (-0.62 ns); online_softmax 100 MHz (+0.51 ns); MAC tile +3.4 ns |
-| Place and route, sky130 (OpenROAD, 10 ns) | online_softmax 117.9 MHz and matmul_tile 142.2 MHz signoff, 0 DRC, 0 antenna, 0 slew/cap; whole engine with 4 OpenRAM SRAM macros routed to GDS but not signed off (power grid shorts at the macro pads, -1.32 ns), see [pd/README.md](pd/README.md) |
+| Place and route, sky130 (OpenROAD, 10 ns) | online_softmax 117.9 MHz and matmul_tile 142.2 MHz signoff, 0 DRC, 0 antenna, 0 slew/cap; whole engine with 4 OpenRAM SRAM macros (143k cells, 2.5 x 2.3 mm) closes at 12.6 ns (79.4 MHz) with 0 DRC and a clean power grid, limited by the macros' half-cycle read, see [pd/README.md](pd/README.md) |
 | SRAM macros | macro-backed memory proven equivalent to the flop RAM in simulation (unit compare and the full engine suite, 11/11) |
 | FPGA (Artix-7, synthesis only) | 84 DSP48, 6 RAMB18, about 8.7k LUTs: fits a Basys 3 |
 | Verification | cocotb vs the golden model for every module, line + functional coverage gates, SymbiYosys proofs, gate-level simulation of the sky130 netlists, a UVM environment for the tile |

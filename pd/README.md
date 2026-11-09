@@ -43,33 +43,53 @@ The reports are copied to `evidence/reports/20261109/`.
 The online_softmax configuration uses a 20% slew/cap repair margin. Without
 it, routing left 12 slew and 1 cap violation of a few tens of ps.
 
-## Whole engine with SRAM macros (attention_top): partial result
+## Whole engine with SRAM macros (attention_top)
 
 The four memories become OpenRAM macros (docs/uarch.md 8.5):
 - Q and K use `sky130_sram_1rw1r_64x256_8`;
 - V and out use `sky130_sram_1rw1r_128x256_8`.
 
-The macros are placed by hand in two rows (`pd/attention_top/`). Run of
-2026-11-09:
+The macros are placed by hand in two rows (`pd/attention_top/`). Final run
+of 2026-11-09, 12.5 ns constraint:
 
-| Step | Result |
+| Metric | Result |
 |---|---|
-| Synthesis | 96,761 std cells, 0.87 mm^2, plus 4 macros (2.28 mm^2); die 2.5 x 2.3 mm |
-| Placement, CTS, routing | complete, GDS written; 0 detailed-route DRC errors, 0 antenna violations |
-| Setup timing | -1.32 ns at 10 ns after global routing (about 88 MHz) |
-| Power-grid signoff | **fails**: 1,566 VDD shapes touch macro `gnd` terminals (IR-drop analysis stops with PSM-0069) |
+| Cells | 143,522 std cells (0.99 mm^2) plus 4 macros (2.28 mm^2); die 2.5 x 2.3 mm |
+| Detailed-route DRC errors | 0 |
+| Antenna violations | 0 |
+| Max slew / cap / fanout violations | 0 / 0 / 0 |
+| Power grid | 0 shorts; all VDD and VSS shapes connected (check_power_grid) |
+| Setup at 12.5 ns (the constraint) | WNS -0.017 ns, TNS -0.075 ns (worst path: K macro read data into s_conv) |
+| Hold at 12.5 ns | +0.21 ns |
+| Signoff STA of the same routed layout at 12.55 / 12.6 ns | setup +0.008 / +0.033 ns, hold +0.21 / +0.22 ns |
+| Result | closes at 12.6 ns (79.4 MHz) |
+| Power (tt, default activity, 12.5 ns) | 149 mW |
+| GDS | written (`6_final.gds`) |
 
-Two problems remain:
-- **Power grid.** The macro LEFs list two columns of met3 pads under both
-  `vdd` and `gnd`, at x = 163.77/876.35 (64x256) and 214.22/926.80
-  (128x256). The custom `pdn.tcl` places the macro straps to avoid them,
-  but the straps still land on gnd pads. The power grid needs a strap
-  layout derived from the LEF pad list, or patched macro LEFs.
-- **Timing.** The macro liberty launches read data from the falling clock
-  edge, so the paths from the macros into the MACs and `drain_buf` get
-  about half a period. Registering the macro outputs, at one more cycle of
-  read latency, would remove that, but it is an RTL change that needs a
-  full re-verify.
+The last row reruns OpenSTA on the final netlist and extracted parasitics
+(`6_final.odb` / `6_final.spef`) with only the clock period changed; nothing
+is re-implemented. `evidence/reports/20261109/orfs_attention_top_final_*`
+holds the reports.
+
+### What it took
+
+- **Macro LEFs.** In both macros, 130 or 258 vdd pads per column (two
+  columns per macro) overlap gnd pads in the abstract. That gave 1,552 of
+  the 1,566 shorts in the first run. `prepare.sh` runs `patch_sram_lef.py`
+  in the container to move those pads to OBS.
+- **Macro edge pads.** The power grid extended the outermost pads, within
+  8 um of a macro's left or right side, outward to the core straps, across
+  the other net's via stacks. That gave the last 14 shorts. The patch moves
+  those pads to OBS too. Thousands of interior pads still connect each net
+  (for example, 1,578 vdd and 1,410 gnd pads in the 64x256 macro).
+- **Clock.** The macro liberty launches read data from the falling clock
+  edge, so paths out of the macros get half a cycle. After global route the
+  setup slack was -1.32 ns at 10 ns, -0.50 ns at 11.5 ns, and -0.02 ns at
+  12.5 ns. Removing the half-cycle path needs an output register with one
+  more cycle of read latency in attention_top, which is a verified RTL
+  change and not done here. Clocking the read port on the inverted clock
+  does not work: the vendor model blanks dout at the read clock's rising
+  edge, and the equivalence tests failed.
 
 The macro wrapper is proven equivalent to the flop RAM in simulation:
 - `tb/sync_ram_sky130`: 2/2 at two seeds, about 39k cycles compared;

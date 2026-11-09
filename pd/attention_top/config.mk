@@ -15,7 +15,10 @@ export SDC_FILE = /work/pd/attention_top/constraint.sdc
 SRAM_DIR = /OpenROAD-flow-scripts/flow/platforms/sky130ram
 SRAM_64  = $(SRAM_DIR)/sky130_sram_1rw1r_64x256_8/sky130_sram_1rw1r_64x256_8
 SRAM_128 = $(SRAM_DIR)/sky130_sram_1rw1r_128x256_8/sky130_sram_1rw1r_128x256_8
-export ADDITIONAL_LEFS = $(SRAM_64).lef $(SRAM_128).lef
+# LEFs with the overlapping vdd/gnd pads moved to OBS (prepare.sh,
+# patch_sram_lef.py); the GDS and liberty are the originals.
+export ADDITIONAL_LEFS = /work/build/lef/sky130_sram_1rw1r_64x256_8.lef \
+                         /work/build/lef/sky130_sram_1rw1r_128x256_8.lef
 export ADDITIONAL_LIBS = $(SRAM_64)_TT_1p8V_25C.lib $(SRAM_128)_TT_1p8V_25C.lib
 export ADDITIONAL_GDS  = $(SRAM_64).gds $(SRAM_128).gds
 
