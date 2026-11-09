@@ -36,6 +36,10 @@ The reports are copied to `evidence/reports/20261109/`.
 | online_softmax (PIPE_ROM=1) | 117.9 MHz | +1.52 ns | +0.49 ns | 3,657 | 60,167 | 1.92 mW | 0 | 0 | 0 / 0 |
 | matmul_tile (4x4 MAC) | 142.2 MHz | +2.97 ns | +0.54 ns | 9,730 | 193,525 | 8.64 mW | 0 | 0 | 0 / 0 |
 
+| online_softmax | matmul_tile |
+|---|---|
+| ![online_softmax layout](../docs/img/layout_online_softmax.png) | ![matmul_tile layout](../docs/img/layout_matmul_tile.png) |
+
 The online_softmax configuration uses a 20% slew/cap repair margin. Without
 it, routing left 12 slew and 1 cap violation of a few tens of ps.
 
