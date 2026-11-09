@@ -7,7 +7,7 @@ fpga-kit-sim and the two audit-fpga-kit rows); nothing has been synthesized
 in Vivado, programmed, or measured on a board. Every on-board result
 described here is PENDING-HARDWARE until you run it on the physical board
 and record bench evidence (photo/video, ILA captures, the timing report) in
-EVIDENCE.md. Until then the only honest claim remains: verified in
+EVIDENCE.md. Until then the only supported claim remains: verified in
 simulation and formal; synthesized to a latch-free netlist; not implemented
 on FPGA. (Wording tightened 2026-09-18, review finding F008/L3: the earlier
 banner said nothing at all had been executed, which contradicted 6.3.6.)
@@ -232,7 +232,7 @@ ports): 115200 baud 8N1.
   exactly this kind of byte-serial front end.
 
 This sketch is now implemented as fpga/attn_uart_top.sv (around attention_top,
-not just the tile). Section 6.3.4 is the normative byte protocol; the host
+not just the tile). Section 6.3.4 is the byte protocol; the host
 script must follow it exactly.
 
 ### 6.3 The shipped bring-up RTL (fpga/)
@@ -351,7 +351,7 @@ tile_runner (no parameters):
 | done | out | 1 | high when the 16-cycle playback has finished; acc_flat stable |
 | acc_flat | out | 384 | 16 SACC Q11.12 accumulators (packing per docs/uarch.md 8.1) |
 
-#### 6.3.3 UART physical layer (normative for both uart modules)
+#### 6.3.3 UART physical layer (both uart modules)
 
 8N1: one start bit (low), 8 data bits LSB first, one stop bit (high), no
 parity, line idles high. Baud is set by localparam
@@ -375,7 +375,7 @@ Transmitter: 10-bit shift register {stop, data, start}, tx wired to its low
 bit (registered, glitch-free, idles high). valid/ready handshake as in the
 port table.
 
-#### 6.3.4 The byte protocol (NORMATIVE)
+#### 6.3.4 The byte protocol
 
 Transport: the 8N1 stream above. All multi-byte quantities are
 LITTLE-ENDIAN: least significant byte first. Q/K/V/output data bytes are ACT
@@ -567,7 +567,7 @@ Check AFTER synthesis, before going further:
   "multi-driven net".
 - Utilization report: sanity-check against the section 3 estimates.
 
-## 8. Reading timing (the honest Fmax)
+## 8. Reading timing (Fmax)
 
 Open Implemented Design > Report Timing Summary. The one number that
 matters: WNS (worst negative slack) under Setup.

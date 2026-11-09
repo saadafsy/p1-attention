@@ -1,34 +1,7 @@
-"""online_softmax Phase 3: functional coverage model + constrained-random
-stimulus, extending tb/online_softmax/ ONLY (per the build brief). Closes the
-audit finding that no existing test approaches the DEN worst case: l reaches
-only ~2^21 in tb/online_softmax/test_online_softmax.py's longest rows
-(length <= 64), while a 256-element constant-score row hits l = 2^23 exactly,
-exercising l bits [23:22] that plain line coverage cannot see.
-
-This file does NOT re-derive the golden model: it imports SoftmaxMirror,
-softmax_step, drive_and_check, start_and_reset and the model/attn.py helpers
-directly from test_online_softmax (house style, same seeded_rng plumbing via
-cocotb.RANDOM_SEED). Every stimulus element in this file is still checked
-cycle-by-cycle against that SAME mirror (via drive_and_check); the coverage
-model below only OBSERVES the values that check already computed, it does
-not weaken or replace it.
-
-Coverage model: plain Python dict-of-counters (no external coverage library,
-cocotb-friendly). Bins are defined in COV.GROUPS below, one dict entry per
-docs/uarch.md-derived corner (score value, diff_w, LUT index for both w and r
-paths, rescale factor, l value, row length, control sequencing, and three
-cross bins). See docs/uarch.md 3.5, 3.6, 6, 6.1, 8.2 for the equations that
-motivate each bin.
-
-Test order matters here (relied upon): cocotb 2.x's RegressionManager
-discovers tests via vars(module).items(), an insertion-ordered dict, and
-start_regression() does a STABLE sort by stage (all default stage 0), so
-tests in one module run in file definition order. directed_den_worst_case is
-defined first (adds its coverage hits, including the l >= 2^23 bins and the
-identity-rescale-at-large-l cross bin), constrained_random_coverage is
-defined second and, being last, dumps the aggregated report at its own end.
-Both share the single module-level COV object, so the report reflects the
-union of everything this file drove through the DUT.
+"""online_softmax functional coverage: directed edge probes plus weighted
+constrained-random rows, each cycle checked against test_online_softmax's
+mirror. Tests run in file order; the last one writes func_coverage.txt and
+requires every reachable bin hit.
 """
 
 import pathlib
@@ -52,13 +25,9 @@ REPORT_PATH = pathlib.Path(__file__).resolve().parent / "func_coverage.txt"
 # Coverage model
 # ============================================================================
 class CoverageModel:
-    """Plain-Python functional coverage: named bins per group, hit counts.
-    Bin definitions transcribed directly from the build brief (docs/uarch.md
-    3.3-3.6, 6, 6.1, 8.2 provide the underlying invariants each bin probes)."""
+    """Named bins per group with hit counts (corners from docs/uarch.md 3.3-3.6, 6, 8.2)."""
 
     GROUPS = {
-        # s in {min -32768, [-32768,-16384), [-16384,0), 0, (0,16384),
-        #       [16384, 32767], max 32767}
         "score": [
             "eq_min_-32768",
             "range_-32768_-16384",
@@ -68,15 +37,15 @@ class CoverageModel:
             "range_16384_32767",
             "eq_max_32767",
         ],
-        # diff_w = s - m_new (always <= 0 by construction: m_new = max(m_base, s))
+        # diff_w = s - m_new, always <= 0
         "diff_w": [
-            "eq_zero",                      # this element IS the new max
-            "positive_impossible",          # documented unreachable, see UNREACHABLE
-            "small_negative_-1024_-16",      # value in [-1.0, -2^-6] (1..64 grid steps)
-            "domain_interior",              # deeper in-domain, not at the clamp edge
-            "clamp_edge_exact_-16384",       # diff == domain floor exactly (-16.0)
-            "below_clamp",                  # diff < -16384, functional clamp engages
-            "zero_tail_idx_ge_710",         # post-clamp/round idx lands in the LUT's zero tail
+            "eq_zero",
+            "positive_impossible",
+            "small_negative_-1024_-16",      # [-1.0, -2^-6]
+            "domain_interior",
+            "clamp_edge_exact_-16384",       # domain floor, -16.0
+            "below_clamp",
+            "zero_tail_idx_ge_710",         # LUT entries 710+ are zero
         ],
         "idx_w": ["0", "1", "2-63", "64-255", "256-511", "512-709", "710-1022", "1023"],
         "idx_r": ["0", "1", "2-63", "64-255", "256-511", "512-709", "710-1022", "1023"],
@@ -104,9 +73,7 @@ class CoverageModel:
         ],
     }
 
-    # Bins that are structurally impossible to hit, with the reason. These are
-    # excluded from the "reachable" denominator when computing closure %, and
-    # listed explicitly in the report instead of being silently ignored.
+    # Excluded from the closure denominator and listed in the report.
     UNREACHABLE = {
         ("diff_w", "positive_impossible"): (
             "diff_w = s - m_new can never be > 0: m_new = max(m_base, s) by "
@@ -197,11 +164,11 @@ def classify_score(s):
 
 
 def classify_diff_w(diff_s, idx_w):
-    """diff_s is the PRE-clamp raw difference s - m_new (may be < -16384)."""
+    """diff_s is the pre-clamp s - m_new (may be < -16384)."""
     if diff_s == 0:
         COV.hit("diff_w", "eq_zero")
     elif diff_s > 0:
-        COV.hit("diff_w", "positive_impossible")  # never actually reached
+        COV.hit("diff_w", "positive_impossible")
     elif -1024 <= diff_s <= -16:
         COV.hit("diff_w", "small_negative_-1024_-16")
     elif -16383 <= diff_s < -1024:
@@ -285,7 +252,7 @@ def idle_gap_bin_name(gap):
 
 
 # ============================================================================
-# Row/gap tracker + the single coverage-aware drive step, shared by both tests
+# Row/gap tracker + coverage-aware drive step
 # ============================================================================
 class RowTracker:
     def __init__(self):
@@ -303,9 +270,7 @@ class RowTracker:
 
 
 async def cov_step(dut, mirror, tracker, in_valid, row_start, s, msg):
-    """One cycle: drives+checks (dut vs mirror, via test_online_softmax's own
-    drive_and_check -- the self-checking core is NOT duplicated here), then
-    records every coverage bin this cycle can speak to."""
+    """Record this cycle's bins, then drive and check via tos.drive_and_check."""
     if in_valid:
         m_base = tos.M_INIT if row_start else mirror.m
         m_new = m_base if m_base >= s else s
@@ -350,9 +315,7 @@ async def cov_step(dut, mirror, tracker, in_valid, row_start, s, msg):
 
     await tos.drive_and_check(dut, mirror, in_valid, row_start, s, msg)
 
-    # l and rescale are continuously-visible/registered outputs (docs/uarch.md
-    # 8.2 port table); sample every cycle, not just accepted ones, so idle
-    # holds (including the post-reset l == 0 hold before any row) count too.
+    # l and r are registered outputs: sample idle holds too.
     classify_l(mirror.l)
     classify_rescale(mirror.r)
     if mirror.r == 0x8000 and mirror.l > (1 << 21):
@@ -362,32 +325,20 @@ async def cov_step(dut, mirror, tracker, in_valid, row_start, s, msg):
 
 
 # ============================================================================
-# Directed DEN worst case (audit finding): 256-element constant-score row.
+# Directed DEN worst case: 256-element constant-score row.
 # ============================================================================
 @cocotb.test()
 async def directed_den_worst_case(dut):
-    """The review finding this test closes: no existing test approaches
-    the DEN worst case (l reaches only ~2^21 with row length <= 64). A
-    256-element row of IDENTICAL scores never moves the running max after
-    element 0 (uarch.md 6.1 identity 1: r == 0x8000 exact identity), so every
-    step is w = 0x8000, r = 0x8000 (after element 0), and
-    l_{j+1} = l_j + 32768 exactly (rshr(l*32768,15) == l for any l, per the
-    identity-1 proof): l after j elements (1-indexed, j = 1..256) ==
-    j * 2^15 exactly, reaching l == 256 * 32768 == 2^23 at j == 256
-    (N_MAX == 256, uarch.md 8.2's induction premise N <= 256 is respected).
-    Asserts EXACT equality every step (not just at the end), plus the mirror
-    DEN width bound 0 <= l < 2^24 throughout (uarch.md 3.6)."""
+    """256 equal scores: r and w stay 0x8000, so l == j * 2^15 every step, reaching 2^23."""
     await tos.start_and_reset(dut)
     mirror = tos.SoftmaxMirror()
     mirror.reset()
     tracker = RowTracker()
 
-    # l == 0 is visible right after reset, before any row starts (continuously
-    # visible per docs/uarch.md 8.2's port table); sample it explicitly so the
-    # l_value.eq_0 bin does not depend on timing of the first row elsewhere.
+    # Post-reset l == 0, sampled before any row.
     classify_l(mirror.l)
 
-    CONST_SCORE = 12345  # arbitrary; identity holds for ANY constant score
+    CONST_SCORE = 12345  # any constant works
     N = 256
     for j in range(N):
         await cov_step(
@@ -416,27 +367,14 @@ async def directed_den_worst_case(dut):
 
 
 # ============================================================================
-# Directed probes: exact LUT index / diff_w edges, row lengths, control gaps,
-# cross bins that constrained-random alone is very unlikely to hit exactly
-# (needle-in-a-haystack exact boundary values), followed by a weighted
-# constrained-random loop for general confidence. All still checked
-# cycle-by-cycle against the SAME mirror via cov_step -> drive_and_check.
+# Directed probes for exact-value bins random stimulus rarely hits
 # ============================================================================
-# Chosen so that -16*idx gives EXACTLY idx after the round-half-up index
-# math (attn.lut_index / rtl lut_index_pre), same technique
-# test_online_softmax.py's rom_lookup_spot_checks uses. These also hit every
-# reachable diff_w bin (see docstring below for the mapping).
+# Covers every idx range bin and every reachable diff_w bin.
 IDX_PROBE_DIFFS = [0, -16, -500, -1024, -1040, -5000, -8200, -11360, -16368, -16384, -20000]
 
 
 async def probe_idx_w_and_diff_w(dut, mirror, tracker):
-    """One 2-element row per diff target: row_start establishes m = BASE
-    (BASE chosen with margin on both sides for |diff| up to 20000), then one
-    non-updating element at s = BASE + diff exercises exactly that diff_w /
-    idx_w pair. Diff list chosen to cover every idx_w range bin
-    (0,1,2-63,64-255,256-511,512-709,710-1022,1023) and every reachable
-    diff_w bin (eq_zero, small_negative, domain_interior, clamp_edge_exact,
-    below_clamp, zero_tail) -- see the diff values picked above."""
+    """Per diff: a row at m = BASE, then s = BASE + diff (no max update)."""
     BASE = 10000
     for diff in IDX_PROBE_DIFFS:
         s0 = BASE
@@ -447,11 +385,7 @@ async def probe_idx_w_and_diff_w(dut, mirror, tracker):
 
 
 async def probe_idx_r(dut, mirror, tracker):
-    """One 2-element row per diff target: row_start establishes m = B, then a
-    genuine UPDATE (s1 = B - diff, diff <= 0 so s1 >= B) makes
-    diff_m = B - s1 = diff exactly, exercising that idx_r bin. (The update
-    element's own diff_w is always 0 here, by identity: it becomes the new
-    max; that is fine, diff_w bins are probed separately above.)"""
+    """Per diff: a row at m = B, then a max update to B - diff, so diff_m == diff."""
     B = -10000
     for diff in IDX_PROBE_DIFFS:
         s0 = B
@@ -467,40 +401,32 @@ async def probe_score_extremes(dut, mirror, tracker):
 
 
 async def probe_row_lengths(dut, mirror, tracker, lengths):
-    """Constant-score rows of the given lengths, back to back with no gap
-    between them here (idle-gap and back-to-back bins are probed separately
-    with explicit gaps, see probe_control_gaps)."""
+    """Constant-score rows of the given lengths, back to back."""
     for length in lengths:
         for i in range(length):
             await cov_step(dut, mirror, tracker, True, i == 0, 777, f"rowlen={length} i={i}")
 
 
 async def probe_control_gaps(dut, mirror, tracker):
-    """Explicit idle gaps of length 1, 2-10 (5), >10 (15), each followed by a
-    fresh row; then two rows back to back (gap == 0) for back_to_back_rows."""
+    """Idle gaps of 1, 5 and 15 before a row, then two rows back to back."""
     for gap in (1, 5, 15):
         for _ in range(gap):
             await cov_step(dut, mirror, tracker, False, False, 0, f"idle-gap len={gap}")
         await cov_step(dut, mirror, tracker, True, True, 1, f"post-gap({gap}) row-start")
         await cov_step(dut, mirror, tracker, True, False, 0, f"post-gap({gap}) elem2")
-    # Back to back: no idle cycle between the previous row's last element and
-    # this row_start.
     await cov_step(dut, mirror, tracker, True, True, 2, "back-to-back row A")
     await cov_step(dut, mirror, tracker, True, True, 3, "back-to-back row B (no gap)")
 
 
 async def probe_cross_max_updated_zero_tail(dut, mirror, tracker):
-    """max_updated_x_zero_tail_w: a max update early in the row, then (later
-    in the SAME row) an element whose diff_w lands deep in the zero tail."""
+    """A max update, then a zero-tail diff_w element in the same row."""
     await cov_step(dut, mirror, tracker, True, True, 0, "cross-mzt row start (m=0)")
     await cov_step(dut, mirror, tracker, True, False, 20000, "cross-mzt update (m=20000)")
     await cov_step(dut, mirror, tracker, True, False, 0, "cross-mzt zero-tail elem (diff=-20000)")
 
 
 async def probe_cross_clamp_edge_rowlen256(dut, mirror, tracker):
-    """clamp_edge_x_rowlen_256: hit the clamp-edge diff_w exactly once early
-    in a row, then pad the SAME row out to the full 256-element length with
-    elements at the established max (identity holds, m never moves again)."""
+    """A clamp-edge diff_w early in a row, padded at the max to 256 elements."""
     BASE = 10000
     await cov_step(dut, mirror, tracker, True, True, BASE, "cross-clamp256 row start")
     await cov_step(
@@ -513,8 +439,7 @@ async def probe_cross_clamp_edge_rowlen256(dut, mirror, tracker):
 
 # ---- Constrained-random generator -------------------------------------------
 def gen_row_scores(rng, length, mode, base):
-    """Build `length` SCORE values for one row, shaped by `mode` (weighted
-    choice made by the caller)."""
+    """Build `length` scores for one row, shaped by `mode`."""
     scores = []
     m = tos.M_INIT
     for i in range(length):
@@ -525,9 +450,7 @@ def gen_row_scores(rng, length, mode, base):
         elif mode == "decreasing":
             s = base - 300 * i
         elif mode == "near_clamp_walk":
-            # Occasionally drop close to (or past) 16.0 below the running max,
-            # to bias toward the domain-clamp / zero-tail corners; otherwise a
-            # small, non-updating wobble.
+            # Sometimes drop near or past 16.0 below the max (clamp corners).
             cur_m = m if i > 0 else tos.M_INIT
             if i > 0 and rng.random() < 0.3:
                 delta = -rng.choice([16384, 16368, 11360, 20000, 5000])
@@ -546,25 +469,14 @@ def gen_row_scores(rng, length, mode, base):
 
 @cocotb.test()
 async def constrained_random_coverage(dut):
-    """Directed edge probes (deterministic, needed because several bins are
-    exact-value needles that pure randomness is very unlikely to hit inside a
-    runtime-bounded test: LUT index boundaries, the -16384 clamp edge, l
-    value boundaries, exact idle-gap lengths, back-to-back rows, and the
-    three cross bins), followed by a weighted constrained-random loop (long
-    constant rows for the DEN corner, increasing/decreasing bursts, a near-
-    clamp random walk, and plain uniform rows), all seeded from
-    cocotb.RANDOM_SEED (house style, tb/matmul_tile and test_online_softmax's
-    seeded_rng()). Dumps the aggregated coverage report (this test runs last
-    in file-definition order, see module docstring) and asserts closure: every
-    reachable bin must be hit, or the test fails loudly (house rule: no
-    weakening a check to make it pass)."""
+    """Directed probes, then weighted random rows; writes the report and requires closure."""
     await tos.start_and_reset(dut)
     mirror = tos.SoftmaxMirror()
     mirror.reset()
     tracker = RowTracker()
     rng = tos.seeded_rng()
 
-    # ---- Directed probes (deterministic edge-hitting) ----------------------
+    # ---- Directed probes ----
     await probe_idx_w_and_diff_w(dut, mirror, tracker)
     await probe_idx_r(dut, mirror, tracker)
     await probe_score_extremes(dut, mirror, tracker)
@@ -573,9 +485,9 @@ async def constrained_random_coverage(dut):
     await probe_cross_max_updated_zero_tail(dut, mirror, tracker)
     await probe_cross_clamp_edge_rowlen256(dut, mirror, tracker)
 
-    # ---- Weighted constrained-random loop -----------------------------------
+    # ---- Weighted constrained-random loop ----
     modes = ["constant", "increasing", "decreasing", "near_clamp_walk", "random_uniform"]
-    weights = [0.30, 0.15, 0.15, 0.25, 0.15]  # bias toward the DEN/clamp corners
+    weights = [0.30, 0.15, 0.15, 0.25, 0.15]
     length_bins = [(1, 1), (2, 2), (3, 16), (17, 64), (65, 255), (256, 256)]
     length_weights = [0.10, 0.10, 0.20, 0.25, 0.20, 0.15]
 
@@ -587,9 +499,6 @@ async def constrained_random_coverage(dut):
         base = rng.randint(-8000, 8000)
         scores = gen_row_scores(rng, length, mode, base)
 
-        # Occasional idle gap before the row (not on trial 0, so at least one
-        # back-to-back transition is also possible via random chance on top
-        # of the deterministic probe_control_gaps coverage above).
         if trial > 0 and rng.random() < 0.5:
             for _ in range(rng.randint(1, 4)):
                 await cov_step(dut, mirror, tracker, False, False, 0, f"cr trial{trial} idle")
@@ -601,7 +510,7 @@ async def constrained_random_coverage(dut):
 
     tracker.finish_row_if_any()
 
-    # ---- Dump report + assert closure ---------------------------------------
+    # ---- Report + closure ----
     text, pct, missed = COV.report()
     REPORT_PATH.write_text(text)
     cocotb.log.info("\n" + text)

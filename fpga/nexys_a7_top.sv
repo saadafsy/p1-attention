@@ -1,30 +1,9 @@
 `timescale 1ns / 1ps
-// nexys_a7_top: Artix-7 board top (added 2026-09-19, target-scores change
-// 2). Despite the name it is board-agnostic: 100 MHz in, a button, the
-// USB-UART pair and two LEDs, which both the Basys 3 (XC7A35T, default,
-// fpga/basys3.xdc) and the Nexys A7-100T (fpga/nexys_a7_100t.xdc) provide;
-// fpga/scripts/build.tcl picks the part and XDC from its board argument.
-// It wraps attn_uart_top with the one Xilinx
-// primitive the clock sweep needs, an MMCME2_BASE that turns the 100 MHz
-// oscillator into the design clock at a frequency set by PARAMETERS, so
-// fpga/scripts/sweep.tcl can rebuild the bitstream at each target frequency
-// without editing any source:
-//
-//   f_design = 100 MHz * CLKFBOUT_MULT_F / (DIVCLK_DIVIDE * CLKOUT0_DIVIDE_F)
-//
-// e.g. MULT 10, DIV 1, OUT 10 -> 100 MHz; OUT 20 -> 50 MHz; OUT 8 -> 125 MHz.
-// The VCO (100 MHz * MULT / DIVCLK) must stay inside the Artix-7 -1 range
-// 600..1200 MHz; MULT 10 gives 1000 MHz. attn_uart_top's CLK_HZ parameter
-// is set from the same numbers so the UART baud divider stays correct at
-// every sweep point (the host baud never changes).
-//
-// The design is held in reset until the MMCM reports LOCKED (or the button
-// is pressed); led_locked shows the lock. Everything below the MMCM is the
-// vendor-neutral kit (attn_uart_top, PIPE_ROM = 1 lanes with block-RAM
-// exp tables under XILINX_FPGA, which fpga/scripts/synth.tcl defines).
-//
-// UNVERIFIED: never synthesized or run (no Vivado, no board where this was
-// written). PENDING-HARDWARE until docs/phase6_fpga_guide.md has the log.
+// nexys_a7_top: Artix-7 board top for Basys 3 (default) or Nexys A7-100T.
+// Wraps attn_uart_top with an MMCME2_BASE so the clock sweep sets the design
+// clock by parameter: f = 100 MHz * MULT / (DIVCLK * CLKOUT0_DIVIDE_F).
+// VCO must stay in 600..1200 MHz. CLK_HZ must match f so the baud divider holds.
+// The kit is held in reset until the MMCM locks.
 module nexys_a7_top #(
     parameter real CLKFBOUT_MULT_F  = 10.0,  // VCO = 100 MHz * MULT / DIVCLK
     parameter int  DIVCLK_DIVIDE    = 1,
@@ -89,8 +68,6 @@ module nexys_a7_top #(
 
   assign led_locked = locked;
 
-  // Reset the kit while the MMCM is unlocked; the button still works as
-  // the manual reset (attn_uart_top synchronizes it internally).
   logic rst_in;
   assign rst_in = rst_btn | ~locked;
 

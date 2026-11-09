@@ -1,18 +1,9 @@
 #!/usr/bin/env bash
-# Compile and run the matmul_tile UVM environment under Vivado xsim.
-#
+# Compile and run the matmul_tile UVM environment under Vivado xsim (UVM 1.2, -L uvm).
 # Usage: run_xsim.sh <test> <seed> <outdir> [extra +plusargs...] [--define MACRO]
 #   test    tile_replay_test | tile_random_test
-#   seed    integer; also used as the coverage database name
-#   outdir  where xvlog/xelab/xsim logs and the coverage db go
-#
-# Requires `xvlog`, `xelab`, `xsim` on PATH (source <Vivado>/settings64.sh).
-# Vivado ships UVM 1.2 as a precompiled library selected with -L uvm.
-# Coverage: xelab --cov all and xsim --cov_db_name/--cov_db_dir; the exact
-# switch spelling has moved between Vivado releases, so validate with the
-# smoke run (`make -C tb/uvm smoke`) before trusting a regression. Merging
-# across seeds is done by xcrg in merge_coverage.sh, which probes for the
-# capability and fails loudly if this Vivado lacks it.
+#   seed    integer; also names the coverage database
+# Coverage switch names vary by Vivado release; check with `make -C tb/uvm smoke`.
 set -euo pipefail
 test_name=${1:?test}; seed=${2:?seed}; outdir=${3:?outdir}; shift 3
 root=$(cd "$(dirname "$0")/../../.." && pwd)

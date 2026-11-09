@@ -1,15 +1,10 @@
 `timescale 1ns / 1ps
-// mac_unit: ACT x ACT multiply, SACC accumulate. First block of the Q.K^T
-// datapath (docs/uarch.md sections 3.1, 3.2, 8).
-//
-// Formats (normative, docs/uarch.md):
-//   a, b : ACT,  signed Q1.6,   8 bits
-//   a*b  : exact signed product, 16 bits, |value| <= 4.0 (only (-2)*(-2))
-//   acc  : SACC, signed Q11.12, 24 bits; exact accumulation, no rounding,
-//          no saturation; overflow impossible for dot lengths <= 511
-//          (proof in uarch.md 3.2; D = 16 here, bound asserted in models/TB)
-//
-// Control contract (one cycle, all synchronous):
+// mac_unit: ACT x ACT multiply, SACC accumulate (uarch 3.1, 3.2).
+//   a, b : ACT Q1.6 s8
+//   a*b  : exact s16, |value| <= 4.0 (only (-2)*(-2))
+//   acc  : SACC Q11.12 s24; no rounding or saturation, cannot overflow for
+//          dot lengths <= 511 (uarch 3.2; D = 16 here)
+// Control (synchronous):
 //   rst          : acc <= 0
 //   clr=1, en=1  : acc <= a*b        (start a new dot product, no dead cycle)
 //   clr=1, en=0  : acc <= 0
@@ -29,17 +24,12 @@ module mac_unit (
   logic signed [23:0] base;
   logic signed [23:0] acc_n;
 
-  // All outputs assigned on all paths: no latches.
   always_comb begin
     prod  = a * b;               // exact 16-bit signed product
     base  = clr ? 24'sd0 : acc;
 `ifdef INJECT_BUG
-    // DELIBERATE MUTATION, compiled ONLY by `make -C tb/uvm bug-proof`
-    // (+define+INJECT_BUG): the load row ignores clr when en is high, so a
-    // new dot product accumulates onto the previous one. It exists to
-    // prove the UVM environment fails when the RTL is wrong; no normal
-    // build (verify, synth, formal, FPGA) defines the macro, and the lint
-    // hook / synth flows see the line below it. Added 2026-09-19.
+    // Deliberate mutation for `make -C tb/uvm bug-proof` only: clr is ignored
+    // when en is high. Proves the UVM environment catches a wrong RTL.
     acc_n = en ? acc + 24'(prod) : base;
 `else
     acc_n = en ? base + 24'(prod) : base;
@@ -55,10 +45,7 @@ module mac_unit (
   end
 
 `ifdef FORMAL
-  // Formal-only scaffolding (guarded, never synthesized; the initial block
-  // below is exempt from the no-initial-in-RTL rule for that reason).
-  // Properties restate the control contract from the header, minimal and
-  // yosys-parseable: immediate assertions only, no SVA sequences.
+  // The control contract from the header, as immediate assertions.
   logic f_past_valid;
   initial f_past_valid = 1'b0;
   always_ff @(posedge clk) f_past_valid <= 1'b1;

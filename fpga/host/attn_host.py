@@ -1,29 +1,10 @@
 #!/usr/bin/env python3
-"""attn_host: the Phase 6 bring-up kit host script (docs/phase6_fpga_guide.md
-section 6.3, byte protocol NORMATIVE at 6.3.4). Runs one self-checking
-attention inference over the UART link and asserts equality against
-model/attn.py attn_fixed. That comparison IS the hardware test the guide
-promises (guide 6.2/6.3.4 "Host flow for one inference").
+"""attn_host: FPGA bring-up host (protocol in docs/phase6_fpga_guide.md 6.3.4).
 
-Structure (deliberate, so tb/fpga_uart can import the wire-level logic
-without needing pyserial or a board):
-  - Module-level constants and pure encode/decode functions: frame builders
-    (build_*) and parsers (parse_status, decode_out_row, decode_cycles,
-    is_nak) that take/return plain bytes. No I/O, no pyserial, importable
-    anywhere.
-  - SerialLink: a thin class wrapping pyserial for the physical transport.
-    `import serial` is INSIDE __init__ (lazy), not at module scope, so this
-    module imports cleanly on a machine without pyserial installed (the
-    cocotb testbench does exactly that: it imports the frame functions and
-    never instantiates SerialLink).
-  - main(): loads random Q/K/V over the link, runs, reads back, and asserts
-    bit-exact equality against model/attn.py attn_fixed. --selftest exercises
-    every encode/decode round trip offline (no device, no pyserial import).
-
-All multi-byte protocol quantities are little-endian (guide 6.3.4). Q/K/V/
-output data bytes are ACT Q1.6 two's-complement codes (docs/uarch.md 3.1):
-the SAME raw int8 codes model/attn.py attn_fixed consumes and returns
-directly, so no float conversion happens anywhere in this script.
+Runs one attention inference over UART and checks it bit-exactly against
+model/attn.py attn_fixed. Usage: attn_host.py --port /dev/ttyUSB1 [--n 16]
+or --selftest (offline). Frame builders and parsers are pure so
+tb/fpga_uart can import them without pyserial. Multi-byte fields are little-endian.
 """
 
 import argparse
@@ -32,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-# ---- Protocol constants (NORMATIVE: docs/phase6_fpga_guide.md 6.3.4) -------
+# Protocol constants (guide 6.3.4)
 CMD_PING = 0x50  # 'P'
 CMD_LOAD_Q = 0x51  # 'Q'
 CMD_LOAD_K = 0x4B  # 'K'
@@ -44,14 +25,12 @@ CMD_READ_OUT = 0x4F  # 'O'
 CMD_READ_CYCLES = 0x43  # 'C'
 
 RESP_PING = 0xA5
-RESP_NAK = 0x3F  # '?'; never a legal command byte, so it can never be
-# mistaken for an echo (guide 6.3.4).
+RESP_NAK = 0x3F  # '?': not a command byte, so never confused with an echo
 
 LOAD_CMDS = (CMD_LOAD_Q, CMD_LOAD_K, CMD_LOAD_V)
-ROW_BYTES = 16  # one Q/K/V/output row payload, uarch.md 8.3
+ROW_BYTES = 16
 
 
-# ---- ACT Q1.6 byte <-> signed int8 code (guide 6.3.4, uarch.md 3.1) --------
 def to_u8(v):
     """Signed int in [-128, 127] (an ACT Q1.6 code) -> unsigned wire byte."""
     if not (-128 <= v <= 127):
@@ -65,15 +44,12 @@ def from_u8(v):
     return v - 256 if v >= 128 else v
 
 
-# ---- Pure frame builders (bytes out, no I/O) -------------------------------
 def build_ping():
     return bytes([CMD_PING])
 
 
 def build_load_row(cmd, row, data16):
-    """cmd in {CMD_LOAD_Q, CMD_LOAD_K, CMD_LOAD_V}; row in [0, 63] (only the
-    low 6 bits are used on the wire, guide 6.3.4); data16 is 16 signed ACT
-    codes, column 0 first."""
+    """LOAD_Q/K/V frame: row (low 6 bits) and 16 signed codes, column 0 first."""
     if cmd not in LOAD_CMDS:
         raise ValueError(f"build_load_row: not a LOAD_* command: {cmd:#x}")
     if len(data16) != ROW_BYTES:
@@ -82,12 +58,7 @@ def build_load_row(cmd, row, data16):
 
 
 def build_set_nlen(n_len):
-    """n_len byte (guide 6.3.4). The DEVICE validates the contract (multiple
-    of 4 in [4, 64]) and answers NAK 0x3F, leaving the stored value
-    unchanged, for anything else (since 2026-09-18; before that an
-    out-of-contract byte launched an undefined run). Building an
-    out-of-contract frame is still legal here so the NAK path can be
-    tested; the byte is sent as given (masked to 8 bits)."""
+    """SET_NLEN frame, unvalidated so the device's NAK path can be tested."""
     return bytes([CMD_SET_NLEN, n_len & 0xFF])
 
 
@@ -107,13 +78,12 @@ def build_read_cycles():
     return bytes([CMD_READ_CYCLES])
 
 
-# ---- Pure response parsers (bytes/int in, Python values out) --------------
 def is_nak(resp_byte):
     return resp_byte == RESP_NAK
 
 
 def parse_status(status_byte):
-    """Status byte (guide 6.3.4): bit0 busy, bit1 done latch, bits 7:2 zero."""
+    """Status byte: bit0 busy, bit1 done latch."""
     return {
         "busy": bool(status_byte & 0x1),
         "done": bool((status_byte >> 1) & 0x1),
@@ -128,28 +98,16 @@ def decode_out_row(data):
 
 
 def decode_cycles(data):
-    """4 little-endian wire bytes -> unsigned cycle_count (guide 6.3.4)."""
+    """4 little-endian wire bytes -> unsigned cycle_count."""
     if len(data) != 4:
         raise ValueError(f"decode_cycles: need 4 bytes, got {len(data)}")
     return int.from_bytes(data, byteorder="little", signed=False)
 
 
-# ---- Pure drain / resync logic (bytes/callables in, plain values out) -----
-# Review finding (guide 6.3.4): a framing-error break long enough to span
-# more than one uart_rx retry attempt can produce a LEGITIMATE (framing-
-# valid) phantom byte once the line returns to idle mid-attempt -- typically
-# all-1s, an unknown command, so the device transmits an UNSOLICITED NAK
-# (0x3F) nobody asked for. Real USB-UART bridges can do exactly this with a
-# BREAK condition on port open/close. drain_bytes below is the pure loop
-# both SerialLink (on connect, and inside resync) use to flush that kind of
-# stale/unsolicited data before trusting the link.
+# A long BREAK (e.g. from a USB-UART bridge on port open) can produce a phantom
+# byte and an unsolicited NAK, so stale bytes are drained before use.
 def drain_bytes(read_fn, chunk_size=256):
-    """Repeatedly call read_fn(chunk_size) -> bytes (any bytes-like, short
-    reads allowed) until it returns nothing, concatenating everything read.
-    A plain function of a read callable (not a socket/serial object) so it
-    is exercised offline in --selftest without pyserial: the TB's own
-    UartTbLink.drain-style helpers mirror this same loop shape against the
-    bit-banged link (see tb/fpga_uart/test_fpga_uart.py)."""
+    """Call read_fn(chunk_size) until it returns nothing; return all bytes read."""
     drained = bytearray()
     while True:
         chunk = read_fn(chunk_size)
@@ -159,47 +117,26 @@ def drain_bytes(read_fn, chunk_size=256):
     return bytes(drained)
 
 
-RESYNC_PING_COUNT = 18  # covers the longest possible in-flight payload: row
-# + 16 data bytes + one command byte (guide 6.3.4).
+RESYNC_PING_COUNT = 18  # longest in-flight payload (row + 16 data) plus one command byte
 
 
 def build_resync_frame():
-    """18 PING bytes (guide 6.3.4 resync procedure). Sending this many pings
-    guarantees the device is back in P_CMD and has processed at least one
-    genuine PING by the time they are all consumed, whatever multi-byte
-    command (if any) was abandoned in flight."""
+    """18 PINGs: enough to finish any abandoned frame and land one real PING."""
     return build_ping() * RESYNC_PING_COUNT
 
 
 def is_resynced(drained_tail):
-    """Pure check on the bytes drained (with a timeout, until quiet) after
-    sending build_resync_frame(): resync succeeds ONLY if the LAST byte seen
-    is 0xA5. Checking only "does 0xA5 appear anywhere" (the guide's original,
-    buggy wording) is wrong: an in-flight multi-byte command can still be
-    mid-flight when the pings start, so the drain can see an echo of that
-    abandoned command followed by several more 0xA5 echoes from pings that
-    landed as fresh commands afterward (up to ~11 of them for an 18-ping
-    burst against a maximally-desynced LOAD_Q/K/V). Stopping at the first
-    0xA5 leaves the link still desynced. Requiring the LAST drained byte to
-    be 0xA5, after a full drain-until-quiet, is the corrected procedure."""
+    """Resynced only if the last drained byte is 0xA5 (earlier ones may precede a stray echo)."""
     return len(drained_tail) > 0 and drained_tail[-1] == RESP_PING
 
 
-# ---- Thin serial transport (pyserial imported lazily, INSIDE __init__) ----
 class SerialLink:
-    """Wraps pyserial for the 8N1 physical transport described in guide
-    6.3.3. All protocol framing lives in the pure functions above; this
-    class only moves bytes and provides one convenience method per command
-    so main() reads as the host flow from guide 6.3.4."""
+    """8N1 pyserial transport with one method per protocol command."""
 
     def __init__(self, port, baud=115200, timeout=2.0, drain_timeout=0.05):
         import serial  # lazy: this module must import without pyserial
 
-        # Connect with a SHORT read timeout first, purely to drain any bytes
-        # already sitting in the RX buffer (e.g. a BREAK artifact some
-        # USB-UART bridges emit on port open/close, guide 6.3.4) before the
-        # real protocol timeout takes over. Without this, a stale byte can
-        # offset every subsequent response by one.
+        # Short timeout first to drain stale RX bytes that would offset every response.
         self._ser = serial.Serial(
             port,
             baudrate=baud,
@@ -229,7 +166,6 @@ class SerialLink:
             raise TimeoutError(f"SerialLink.read: expected {n} bytes, got {len(data)}: {data!r}")
         return data
 
-    # One convenience method per protocol command (guide 6.3.4 table).
     def ping(self):
         self.write(build_ping())
         return self.read(1)[0]
@@ -251,9 +187,7 @@ class SerialLink:
         return parse_status(self.read(1)[0])
 
     def read_out_row(self, row):
-        """READ_OUT. The device NAKs (one byte, 0x3F) while a run is busy
-        (guide 6.3.4, 2026-09-18); poll STATUS until done first, as main()
-        does. A NAK here raises rather than being mis-parsed as row data."""
+        """READ_OUT; the device NAKs while busy, which raises instead of parsing as data."""
         self.write(build_read_out(row))
         first = self.read(1)
         if is_nak(first[0]):
@@ -269,21 +203,7 @@ class SerialLink:
         return decode_cycles(first + self.read(3))
 
     def resync(self, settle_timeout=0.5):
-        """guide 6.3.4 resync procedure, CORRECTED: send 18 pings, then
-        drain every response with a timeout until the line goes quiet (real
-        hardware's RX is continuously live in the background regardless of
-        what this call is doing, so nothing is missed by draining
-        afterward, unlike the TB's simulation-only concurrency concern --
-        see tb/fpga_uart/test_fpga_uart.py's do_resync). Declares success
-        only if the LAST byte drained is 0xA5 (see is_resynced).
-
-        WARNING, unconditionally: the pings themselves may have been
-        consumed as payload of whatever command was in flight (0x50 is a
-        legal row byte and a legal ACT data code), corrupting any rows
-        already loaded. Callers MUST reload every Q/K/V row after calling
-        this, whether or not it returns True quickly -- resync only
-        recovers the COMMAND stream, never the data that was mid-load when
-        the desync happened."""
+        """Send 18 pings, drain until quiet, check the last byte; then reload all Q/K/V rows."""
         self.write(build_resync_frame())
         old_timeout = self._ser.timeout
         self._ser.timeout = settle_timeout
@@ -294,7 +214,6 @@ class SerialLink:
         return is_resynced(tail)
 
 
-# ---- Offline self-test: every encode/decode round trip, no hardware -------
 def selftest():
     row = 5
     data = [max(-128, min(127, ((-1) ** i) * (i * 7 % 130))) for i in range(16)]
@@ -310,7 +229,6 @@ def selftest():
     assert build_ping() == bytes([CMD_PING])
     assert build_set_nlen(16) == bytes([CMD_SET_NLEN, 16])
     assert build_set_nlen(64) == bytes([CMD_SET_NLEN, 64])
-    # low-7-bits-only wrap: an out-of-range byte still encodes deterministically
     assert build_set_nlen(0x81) == bytes([CMD_SET_NLEN, 0x81])  # sent as-is; the device NAKs it
     assert build_run() == bytes([CMD_RUN])
     assert build_status() == bytes([CMD_STATUS])
@@ -322,7 +240,7 @@ def selftest():
     assert parse_status(0b01) == {"busy": True, "done": False}
     assert parse_status(0b10) == {"busy": False, "done": True}
     assert parse_status(0b11) == {"busy": True, "done": True}
-    # bits 7:2 must be ignored, not corrupt the parse (0xFE: bit1=1, bit0=0)
+    # bits 7:2 are ignored
     assert parse_status(0b11111110) == {"busy": False, "done": True}
 
     assert decode_cycles(bytes([0x01, 0x00, 0x00, 0x00])) == 1
@@ -348,8 +266,7 @@ def selftest():
     else:
         raise AssertionError("to_u8(128) must raise ValueError (out of ACT range)")
 
-    # drain_bytes: pure loop over a fake read_fn, no pyserial/socket needed.
-    canned = [b"\xa5\x3f", b"more", b""]  # two non-empty reads, then quiet
+    canned = [b"\xa5\x3f", b"more", b""]
 
     def fake_read(_n):
         return canned.pop(0) if canned else b""
@@ -361,27 +278,19 @@ def selftest():
 
     assert drain_bytes(fake_read_already_quiet) == b""
 
-    # resync: frame shape and the corrected last-byte-must-be-0xA5 check.
     frame = build_resync_frame()
     assert len(frame) == RESYNC_PING_COUNT == 18
     assert set(frame) == {CMD_PING}
 
-    assert not is_resynced(b"")  # nothing drained: link never settled
-    assert not is_resynced(bytes([RESP_PING, RESP_NAK]))  # trailing byte wrong
+    assert not is_resynced(b"")
+    assert not is_resynced(bytes([RESP_PING, RESP_NAK]))
     assert is_resynced(bytes([RESP_PING]))
-    # the documented worst case: one stray echo of an abandoned multi-byte
-    # command, then several 0xA5 echoes from pings that landed as fresh
-    # commands -- must still resync on the trailing 0xA5.
+    # stray echo of an abandoned command, then ping echoes
     assert is_resynced(bytes([CMD_LOAD_Q, RESP_PING, RESP_PING, RESP_PING]))
-    # stopping at the FIRST 0xA5 (the guide's original, buggy wording) would
-    # have wrongly declared success here too soon; the corrected check only
-    # cares about the LAST byte, which this case also satisfies -- the real
-    # bug that check fixes is caught above (0xA5 not last).
 
     print("attn_host --selftest: all encode/decode round trips PASS")
 
 
-# ---- main(): the self-checking hardware test (guide 6.2/6.3.4) ------------
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--port", help="serial device, e.g. /dev/ttyUSB1")
@@ -406,8 +315,7 @@ def main(argv=None):
         print("error: --n must be a multiple of 4 in [4, 64] (uarch.md 8.3)", file=sys.stderr)
         return 2
 
-    # Golden model import: repo_root/model, deferred to here so --selftest
-    # never needs it either.
+    # Deferred so --selftest does not need the model.
     root = Path(__file__).resolve().parent.parent.parent
     sys.path.insert(0, str(root / "model"))
     import attn as attn_model  # noqa: E402
@@ -460,7 +368,7 @@ def main(argv=None):
 
         cycles = link.read_cycles()
         nblk = n // 4
-        expected_cycles = nblk * (16 * nblk + 156) + 1  # docs/uarch.md 8.3 closed form
+        expected_cycles = nblk * (16 * nblk + 156) + 1
         assert cycles == expected_cycles, (
             f"READ_CYCLES={cycles} != formula nblk*(16*nblk+156)+1={expected_cycles}"
         )

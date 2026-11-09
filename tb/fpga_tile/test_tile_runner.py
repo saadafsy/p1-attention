@@ -1,25 +1,18 @@
-"""cocotb testbench for tile_runner (docs/phase6_fpga_guide.md 6.1/6.3.5):
-pulse go, wait for done, and check acc_flat against BOTH the documented
-table in fpga/tile_runner.sv / guide 6.3.5 AND an INDEPENDENT computation
-using the same golden-dot-product conventions as tb/matmul_tile
-(acc(i,j) = exact sum_d q_i[d] * k_j[d], mac_unit's own D<=511-exact
-semantics, docs/uarch.md 3.2/8.1). Checking the documented table alone would
-not catch a bug that corrupted the guide's own worked example; checking only
-against an independent computation would not catch a stimulus-ROM bug that
-happened to still match some other, wrong, closed form. Doing both closes
-that gap. Fixed-function block, one directed test is sufficient.
+"""tile_runner cocotb testbench (docs/phase6_fpga_guide.md 6.3.5).
+
+Pulses go and checks acc_flat against both the documented table and an
+independent dot-product computation, so an error in either one is caught.
 """
 
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import FallingEdge, RisingEdge
 
-D = 16  # head dimension, uarch.md section 1
+D = 16  # head dimension
 ACC_W = 24
 ACC_MOD = 1 << ACC_W
 
-# Stimulus (guide 6.3.5 / fpga/tile_runner.sv header comment): Q row i
-# constant over d, K row j at element d = (j+1)*(d+1).
+# Q row i is constant over d; K row j at element d is (j+1)*(d+1).
 Q_CODES = [1, 2, 3, -4]
 
 
@@ -28,9 +21,7 @@ def k_code(j, d):
 
 
 def golden_dot():
-    """Independent computation, same convention as tb/matmul_tile's
-    golden_dot: acc(i,j) = exact D-length dot product, with the uarch.md 3.2
-    width bound asserted on every value."""
+    """Exact dot products for all 16 (i, j) pairs, asserting |sacc| < 2^23."""
     g = [[0] * 4 for _ in range(4)]
     for i in range(4):
         for j in range(4):
@@ -40,9 +31,7 @@ def golden_dot():
     return g
 
 
-# The documented table (guide 6.3.5 / fpga/tile_runner.sv header comment),
-# transcribed independently here so a transcription bug in either place is
-# still caught by the cross-check below.
+# Documented table from guide 6.3.5 and fpga/tile_runner.sv.
 EXPECTED_TABLE = {
     (0, 0): 136, (0, 1): 272, (0, 2): 408, (0, 3): 544,
     (1, 0): 272, (1, 1): 544, (1, 2): 816, (1, 3): 1088,
@@ -56,8 +45,7 @@ def wrap24(x):
 
 
 def get_all_acc(dut):
-    """Read acc_flat as one 384-bit integer and slice in Python (house
-    style, tb/matmul_tile). acc_flat[24*(4*i+j)+:24], row-major."""
+    """Slice the 384-bit acc_flat in Python into signed acc[i][j]."""
     val = int(dut.acc_flat.value)
     acc = [[0] * 4 for _ in range(4)]
     for i in range(4):
@@ -80,10 +68,7 @@ async def start_and_reset(dut):
 
 @cocotb.test()
 async def playback_matches_documented_and_independent_golden(dut):
-    """Self-check the documented table against the independent dot-product
-    computation FIRST (so a transcription bug in either source cannot slip
-    through), then pulse go, wait for done, and compare acc_flat bit-exactly
-    against both."""
+    """Cross-check table vs computation, run the playback, compare, then clr."""
     await start_and_reset(dut)
 
     computed = golden_dot()
@@ -125,8 +110,7 @@ async def playback_matches_documented_and_independent_golden(dut):
             )
     dut._log.info(f"tile_runner playback matches documented + independent golden: {got}")
 
-    # clr in R_DONE clears the accumulators and returns to R_IDLE (guide
-    # 6.3.5), independently checked here too.
+    # clr in R_DONE zeroes the accumulators and returns to R_IDLE.
     dut.clr.value = 1
     await RisingEdge(dut.clk)
     dut.clr.value = 0

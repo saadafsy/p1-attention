@@ -1,23 +1,11 @@
--- mac_unit (VHDL-2008 port of rtl/mac_unit.sv, added 2026-09-19, target-
--- scores change 9). Same contract, same widths, same priority, kept in the
--- repo beside the SystemVerilog original; tb/vhdl_mac replays one golden
--- vector file through both and byte-compares the traces (`make
--- vhdl-crosscheck`), which is the only evidence the port is equivalent.
---
--- Formats (normative, docs/uarch.md 3.1/3.2):
---   a, b : ACT, signed Q1.6, 8 bits
---   a*b  : exact signed product, 16 bits
---   acc  : SACC, signed Q11.12, 24 bits; exact accumulation, no rounding,
---          no saturation; overflow impossible for dot lengths <= 511
---
--- Control contract (one cycle, all synchronous):
---   rst          : acc <= 0
---   clr=1, en=1  : acc <= a*b        (start a new dot product, no dead cycle)
---   clr=1, en=0  : acc <= 0
---   clr=0, en=1  : acc <= acc + a*b
---   clr=0, en=0  : hold
---
--- STATUS: never simulated (no GHDL where this was written).
+-- mac_unit: VHDL-2008 port of rtl/mac_unit.sv, same contract and widths.
+-- `make vhdl-crosscheck` compares both against one golden vector file.
+--   a, b : ACT Q1.6 s8; a*b exact s16
+--   acc  : SACC Q11.12 s24; no rounding or saturation, no overflow for
+--          dot lengths <= 511 (uarch 3.2)
+-- Control: rst clears; clr=1,en=1 loads a*b; clr=1,en=0 clears;
+-- clr=0,en=1 accumulates; else hold.
+-- Not yet simulated.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -48,8 +36,7 @@ begin
       if rst = '1' then
         acc_q <= (others => '0');
       else
-        -- exact 16-bit signed product (8s x 8s), sign-extended to 24 bits;
-        -- the 24-bit addition wraps exactly like the SystemVerilog 24'() cast
+        -- 24-bit addition wraps like the SystemVerilog 24'() cast
         prod := signed(a) * signed(b);
         if clr = '1' then
           base := (others => '0');

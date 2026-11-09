@@ -88,3 +88,15 @@ VERIFY OK: online_softmax
 | fpga-resources-20261108 | yosys synth_xilinx (xc7) of fpga/attn_uart_top.sv: 84 DSP48E1, 6 RAMB18E1 (Q, K, four exp ROMs), 96 RAM64M (V, out as distributed RAM), ~8.7k LUT, ~5.0k FF; no memory implemented in flip-flops. Synthesis count only; no Vivado run, no placement, no FPGA timing | PASS (synthesis count) | bash scripts/fpga_resources.sh (build/fpga_resources.txt) | 0 |
 | verify-attention_top-20261108T211610Z | attention_top passes lint/sim/cov/synth/formal | PASS | make verify MODULE=attention_top SEED=1 | 0 |
 VERIFY OK: attention_top
+| verify-tool_smoke-20261109T003130Z | tool_smoke passes lint/sim/cov/synth/formal | PASS | make verify MODULE=tool_smoke SEED=1 | 0 |
+VERIFY OK: tool_smoke
+| verify-online_softmax-20261109T003130Z | online_softmax passes lint/sim/cov/synth/formal | PASS | make verify MODULE=online_softmax SEED=1 | 0 |
+VERIFY OK: online_softmax
+| verify-mac_unit-20261109T003130Z | mac_unit passes lint/sim/cov/synth/formal | PASS | make verify MODULE=mac_unit SEED=1 | 0 |
+VERIFY OK: mac_unit
+| model-crosscheck-20261109T003159Z | attn.py and attn.cpp bit-identical on random + corner cases; tracked exp LUT verified against generator and sha256 pin; float gate met | PASS | make model-check | 0 |
+VERIFY OK: attn_model
+| verify-matmul_tile-20261109T003130Z | matmul_tile passes lint/sim/cov/synth/formal | PASS | make verify MODULE=matmul_tile SEED=1 | 0 |
+VERIFY OK: matmul_tile
+| verify-attention_top-20261109T003149Z | attention_top passes lint/sim/cov/synth/formal | PASS | make verify MODULE=attention_top SEED=1 | 0 |
+VERIFY OK: attention_top

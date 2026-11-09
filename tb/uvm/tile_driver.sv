@@ -1,9 +1,6 @@
-// tile_driver: one seq_item per clock edge onto tile_if.drv_cb. The
-// item's control/operands are driven for exactly one cycle; the sequence
-// decides what the next cycle holds (there is no protocol handshake in the
-// tile, docs/uarch.md 8.1: "the tile contains no counters, no FSM"). Every
-// driven item is also published on driven_ap so the scoreboard can pair
-// it, in order, with the monitor's observation of the same edge.
+// tile_driver: one seq_item per clock edge onto tile_if.drv_cb (no
+// handshake). Each driven item is also published on driven_ap for the
+// scoreboard.
 class tile_driver extends uvm_driver #(tile_seq_item);
   `uvm_component_utils(tile_driver)
   virtual tile_if vif;
@@ -21,7 +18,6 @@ class tile_driver extends uvm_driver #(tile_seq_item);
   endfunction
 
   task run_phase(uvm_phase phase);
-    // Idle defaults before the first item.
     vif.drv_cb.rst    <= 1'b1;
     vif.drv_cb.en     <= 1'b0;
     vif.drv_cb.clr    <= 1'b0;

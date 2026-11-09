@@ -1,43 +1,17 @@
-# cocotb testbench for online_softmax. Real verilator line coverage is
-# enabled; coverage.dat is written to this directory and picked up by
-# scripts/check_coverage.py from the repo root.
-#
-# Self-contained module: the RTL is `include-based (rtl/online_softmax.sv
-# `include "rtl/exp_lut.svh", docs/uarch.md 8.2), NOT a second Verilog
-# source, so VERILOG_SOURCES lists only online_softmax.sv. The include path
-# is written repo-root-relative in the RTL, so we hand verilator an
-# incdir that IS the repo root; `include "rtl/exp_lut.svh" then resolves as
-# <repo_root>/rtl/exp_lut.svh, which exists. Verified directly: dropping
-# this EXTRA_ARGS line reproduces a "No such file or directory" from
-# verilator on the `include line, confirming this is the flag doing the
-# resolution (not some other default include path).
+# cocotb testbench for online_softmax with verilator line coverage
+# (coverage.dat, read by scripts/check_coverage.py).
 SIM ?= verilator
 TOPLEVEL_LANG ?= verilog
 
 PWD := $(shell pwd)
-# rtl/exp_lut_1p.sv is the registered one-port ROM the PIPE_ROM=1
-# elaboration instantiates (2026-09-19); unused by PIPE_ROM=0.
+# exp_lut_1p.sv is only instantiated when PIPE_ROM=1.
 VERILOG_SOURCES = $(PWD)/../../rtl/exp_lut_1p.sv \
                    $(PWD)/../../rtl/online_softmax.sv
 
 COCOTB_TOPLEVEL = online_softmax
 
-# PIPE_ROM config knob (Phase 4, docs/uarch.md 8.2.1). Default 0 = today's
-# invocation, byte-for-byte: same COCOTB_TEST_MODULES, same SIM_BUILD
-# (sim_build), same COCOTB_RESULTS_FILE (results.xml), same coverage.dat
-# path -- these are exactly the artifacts scripts/check_coverage.py
-# --module online_softmax and EVIDENCE.md's func_coverage.txt reference, so
-# `make verify` / `make coverage` must see them unchanged.
-#
-# PIPE_ROM=1 elaborates the registered-ROM (latency-2) variant via a
-# verilator elaboration-time parameter override (-GPIPE_ROM=1) and runs a
-# separate, latency-2-aware test module. To guarantee a PIPE_ROM=1 run can
-# NEVER clobber the default run's artifacts (even if invoked back-to-back in
-# either order), it is redirected to its own build directory, its own
-# COCOTB_RESULTS_FILE, and -- since verilator writes its coverage dump only
-# via a RUNTIME +plusarg, not a compile-time flag -- its own coverage.dat
-# filename via +verilator+coverage+file+<name>. None of these three paths
-# collide with the default run's sim_build/, results.xml, or coverage.dat.
+# PIPE_ROM=1 (latency-2 ROM) runs its own test module with separate build dir,
+# results and coverage file so it never clobbers the default run's artifacts.
 PIPE_ROM ?= 0
 
 ifeq ($(PIPE_ROM),1)
@@ -46,14 +20,13 @@ SIM_BUILD ?= sim_build_pipe_rom1
 COCOTB_RESULTS_FILE ?= results_pipe_rom1.xml
 EXTRA_ARGS += -GPIPE_ROM=1
 COCOTB_PLUSARGS += +verilator+coverage+file+coverage_pipe_rom1.dat
-# ROM excluded from this run's instrumentation; gated by
-# `make coverage MODULE=online_softmax PIPE_ROM=1` at the repo root
-# (see coverage_pipe_rom1.vlt for the rationale).
+# Excludes the ROM from coverage (see coverage_pipe_rom1.vlt).
 VERILOG_SOURCES := $(PWD)/coverage_pipe_rom1.vlt $(VERILOG_SOURCES)
 else
 COCOTB_TEST_MODULES = test_online_softmax,test_softmax_coverage
 endif
 
+# Repo root, for `include "rtl/exp_lut.svh".
 EXTRA_ARGS += +incdir+$(PWD)/../..
 EXTRA_ARGS += --coverage-line
 

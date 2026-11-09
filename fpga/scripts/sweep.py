@@ -1,25 +1,10 @@
 #!/usr/bin/env python3
-"""Clock sweep on the board (Basys 3 default, or Nexys A7; change 2, step 5): for each
-target frequency, rebuild the bitstream with MMCM parameters that produce
-it, program the board, run the self-checking host test
-(fpga/host/attn_host.py, output compared against model/attn.py), and record
-one CSV row. The last frequency at which the golden compare PASSES on the
-board is the MEASURED maximum; Vivado's WNS is recorded beside it but is a
-tool number, not the measurement.
+"""Board clock sweep: per frequency, rebuild, program, run attn_host.py, log a CSV row.
 
-Usage (from the repo root, Vivado on PATH, board on PORT):
-  python3 fpga/scripts/sweep.py --port /dev/ttyUSB1 --freqs 50,75,100,110,125,140
-Writes build/fpga/sweep.csv with columns:
-  freq_mhz, mult, divclk, out_div, vivado_wns_ns, bitstream_built,
-  programmed, hw_test, n_len, seed
-Rows with bitstream_built=0 are timing failures at that frequency; they are
-recorded but never programmed (a failing-timing bitstream is not "working").
-
-MMCM parameters: VCO fixed at 1000 MHz (100 MHz * 10 / 1), so
-f = 1000 / CLKOUT0_DIVIDE_F with CLKOUT0_DIVIDE_F in 0.125 steps in
-[2.0, 128.0]. Only frequencies representable that way are accepted.
-
-UNVERIFIED: written without Vivado or a board.
+The highest frequency whose hardware test passes is the measured maximum.
+Usage (repo root, Vivado on PATH):
+  python3 fpga/scripts/sweep.py --port /dev/ttyUSB1 --freqs 50,75,100,110,125
+Writes build/fpga/sweep.csv. VCO is 1000 MHz, so f must be 1000/(k/8) for k in [16, 1024].
 """
 import argparse
 import csv
@@ -98,8 +83,7 @@ def main():
               f"(last PASS in the sweep; the tool WNS column is not a measurement)")
     else:
         print("no frequency passed on hardware; nothing is measured")
-    # The sweep is a gate: no passing row, no measurement, nonzero exit
-    # (make -C fpga hw-gate must not print PASS on an empty result).
+    # Nonzero with no passing row so make hw-gate cannot report PASS.
     return 0 if passing else 1
 
 

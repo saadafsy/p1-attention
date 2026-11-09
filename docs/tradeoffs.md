@@ -25,7 +25,7 @@ Both configs were taken through the identical flow on 2026-07-16:
 2. STA: OpenSTA, scripts/sta.tcl, at 10 ns and at each config's met period
    (build/sta_online_softmax*.log).
 3. GLS: both netlists replay the SAME 549-cycle spec-derived golden vector
-   set (scripts/gen_gls_vectors.py, from the normative uarch.md 8.2/8.2.1
+   set (scripts/gen_gls_vectors.py, from uarch.md 8.2/8.2.1
    text and model/attn.py primitives, not from the RTL) under iverilog with
    the sky130 FUNCTIONAL cell models: 546 checked cycles, 0 errors each
    (make -C tb/gls all, build/gls_lat*.log). The runs dump the VCDs used

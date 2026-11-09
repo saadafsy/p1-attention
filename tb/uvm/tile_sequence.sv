@@ -1,17 +1,8 @@
-// Sequences for the matmul_tile UVM environment.
-//
-// tile_replay_sequence: drives the stimulus columns of a golden vector file
-//   written by scripts/gen_tile_uvm_vectors.py --emit (Python-generated
-//   constrained-random stimulus + the Python mirror's expected acc after
-//   every edge). Each item carries its expected acc_flat; the scoreboard
-//   compares in-sim. This is the replay test's golden path.
-//
-// tile_random_sequence: SV constrained-random items (tile_seq_item's rand
-//   fields and constraints), shaped into whole dot products (clr on d=0,
-//   16 enabled beats, bubbles, explicit clears). No expected values exist
-//   in-sim on purpose (no SV reference model); the monitor writes the
-//   observed trace and `make -C tb/uvm check` runs the Python mirror over
-//   it after the simulation.
+// tile_replay_sequence: replays a golden vector file from
+//   scripts/gen_tile_uvm_vectors.py --emit, with expected acc per edge.
+// tile_random_sequence: constrained-random whole dot products (clr on d=0,
+//   16 enabled beats, bubbles, clears); checked post-sim by
+//   `make -C tb/uvm check`.
 typedef uvm_sequencer #(tile_seq_item) tile_sequencer;
 
 class tile_replay_sequence extends uvm_sequence #(tile_seq_item);
@@ -66,15 +57,12 @@ class tile_random_sequence extends uvm_sequence #(tile_seq_item);
     super.new(name);
   endfunction
 
-  // One item with the given control, operands randomized under the item's
-  // own constraints (so every operand still follows the Q1.6 edge weighting).
-  // Argument names differ from the item's fields so the inline constraint needs
-  // no local:: (Verilator's randomize rejects it; plain names work everywhere).
+  // One item with fixed control and randomized operands. Argument names
+  // differ from the fields so no local:: is needed (Verilator rejects it).
   task drive(bit r_rst, bit r_en, bit r_clr);
     tile_seq_item it = tile_seq_item::type_id::create("rnd");
-    // c_ctrl (dist weights) is switched off because the inline equalities below fix
-    // all three controls; Verilator 5.053 reports dist + == on one variable as
-    // unsatisfiable. Operand constraints (c_q, c_k) stay on.
+    // c_ctrl off: Verilator 5.053 reports dist plus == on one variable as
+    // unsatisfiable.
     it.c_ctrl.constraint_mode(0);
     start_item(it);
     if (!it.randomize() with { rst == r_rst; en == r_en; clr == r_clr; })
@@ -88,8 +76,7 @@ class tile_random_sequence extends uvm_sequence #(tile_seq_item);
     drive(1, 0, 0);
     drive(0, 0, 0);
     repeat (num_dots) begin
-      // whole D=16 dot product: clr with en on d=0, then 15 accumulates,
-      // with occasional hold bubbles (en=0, garbage operands) inside
+      // D=16 dot product with occasional hold bubbles
       for (int d = 0; d < 16; d++) begin
         if (d > 0 && ($urandom_range(0, 99) < 8)) drive(0, 0, 0);
         drive(0, 1, d == 0);

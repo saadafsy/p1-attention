@@ -1,12 +1,12 @@
 # uarch.md: Streaming Attention Engine, numeric and microarchitecture spec
 
-Status: Sections 1 to 7 are NORMATIVE as of Phase 0 (they define the bit-exact
+Status: Sections 1 to 7 are fixed as of Phase 0 (they define the bit-exact
 contract that model/attn.py, model/attn.cpp, and all later RTL must implement).
 Section 8 (dataflow and naming) is a draft that Phase 1 refines; formats in it
 are still binding.
 
-This file is the source of truth for naming and numerics. If code and this file
-disagree, this file wins and the code is the bug.
+This file is the source of truth for naming and numerics; the RTL and the
+models implement it exactly.
 
 ## 1. Fixed configuration
 
@@ -102,7 +102,7 @@ softmax). raw = 32768 = 0x8000 needs 16 unsigned bits with 15 fractional bits.
 Value quantization is 2^-15, two orders below the index error; not the
 bottleneck.
 
-### 3.5 exp approximation: direct LUT (normative table = model/exp_lut.hex)
+### 3.5 exp approximation: direct LUT (table = model/exp_lut.hex)
 
 Method: direct-mapped ROM lookup, no interpolation.
 
@@ -215,7 +215,7 @@ den raw = value * 2^15, so
   num_raw / den_raw = out_value * 2^(21-15) = out_value * 2^6
 which is exactly the Q1.6 raw output. No pre-shift, no post-shift.
 
-The NORMATIVE quotient definition, identical in both models and binding on
+The quotient definition, identical in both models and binding on
 the RTL:
   out_raw = sat8( floor( (2*num_raw + den_raw) / (2*den_raw) ) )
 i.e. round-half-up of num/den, expressed in exact integers. In the models:
@@ -392,7 +392,7 @@ Build order: mac_unit -> matmul_tile -> online_softmax -> attention_top.
 | Module         | Function (formats from Section 2)                            |
 |----------------|--------------------------------------------------------------|
 | mac_unit       | ACT x ACT multiply, SACC accumulate, clr/en control          |
-| matmul_tile    | output-stationary 4x4 grid of mac_unit, normative spec in 8.1 |
+| matmul_tile    | output-stationary 4x4 grid of mac_unit, spec in 8.1 |
 | online_softmax | per-row (m, l) state, LUT, rescale multiplier, emits w and r |
 | attention_top  | row streamer, NUM accumulators, final divider, tile control  |
 
@@ -401,7 +401,7 @@ restoring core with the negative-numerator floor correction, about 34 cycles
 serial); it is off the per-element critical loop because it runs once per
 output element after row accumulation completes.
 
-### 8.1 matmul_tile: 4x4 output-stationary score tile (NORMATIVE, Phase 1)
+### 8.1 matmul_tile: 4x4 output-stationary score tile
 
 Function: computes one 4x4 block of the score matrix S = Q.K^T. A grid of
 4 x 4 = 16 mac_unit instances; MAC (i, j) accumulates q_i[d] * k_j[d] over
@@ -414,7 +414,7 @@ completes in the same D cycles as a single dot product.
 
 Dataflow decision: this is an OUTPUT-STATIONARY outer-product-accumulate
 array, not the TPU-style weight-stationary systolic array the build sheet's
-reference language mentions. The reasons, stated so the deviation is honest:
+reference language mentions. The reasons, stated so the deviation is explicit:
 
 - On the score path BOTH operands stream. Q and K are per-inference
   activations; there is no long-lived weight matrix that is reused across
@@ -484,7 +484,7 @@ Naming conventions (binding for all RTL):
 - Format-carrying buses are named with their format when ambiguous, e.g.
   s_q5_10, w_uq1_15.
 
-### 8.2 online_softmax: per-row (m, l) state machine (NORMATIVE, Phase 1)
+### 8.2 online_softmax: per-row (m, l) state machine
 
 Implementation note (2026-11-08): the port behaviour, values and latencies
 below are unchanged; the internal realization (one ROM lookup per element,
@@ -563,7 +563,7 @@ exp_lut_rom, 1024 x 16 bit). It is emitted ONLY by
 'python3 model/attn.py --emit-lut-svh rtl/exp_lut.svh', is never hand-edited,
 and must match model/exp_lut.hex entry for entry (the testbench re-checks all
 1024 entries against the hex). This keeps 3.5's single generation source:
-model/exp_lut.hex remains the normative interchange artifact (sha256-pinned
+model/exp_lut.hex remains the interchange artifact (sha256-pinned
 in 3.5) consumed by attn.cpp; the .svh is the same table rendered
 synthesizable, avoiding a $readmemh initial block (banned by the RTL coding
 standard) and memory-file path resolution differences across the
@@ -581,7 +581,7 @@ expected critical path of the whole design. The registered-ROM variant that
 cuts it is parameterized into the module and specified in 8.2.1.
 
 Golden model files:
-- model/attn.py: normative executable spec (pure-integer core, emits
+- model/attn.py: executable spec (pure-integer core, emits
   model/exp_lut.hex and the generated rtl/exp_lut.svh rendering of it,
   NumPy float reference for the error budget).
 - model/attn.cpp: independent reimplementation, required bit-identical;
@@ -590,10 +590,10 @@ Golden model files:
   models bit-identical, reports the measured float error. Run via
   make model-check, which appends the EVIDENCE.md row on success.
 
-### 8.2.1 PIPE_ROM registered-ROM variant (NORMATIVE for Phase 4)
+### 8.2.1 PIPE_ROM registered-ROM variant
 
 Parameter: PIPE_ROM, 1 bit, default 0, on online_softmax only. PIPE_ROM = 0
-is the normative default: it elaborates exactly the single-cycle logic of
+is the default: it elaborates exactly the single-cycle logic of
 8.2 (out_valid latency 1, same netlist semantics) and is the configuration
 attention_top instantiates; nothing in 8.3 changes. PIPE_ROM = 1 is the
 Phase 4 timing variant. The recurrence ARITHMETIC of 8.2 (the per-element
@@ -665,7 +665,7 @@ earlier; l, w, r hold and out_valid is low when no element was accepted two
 cycles earlier). Full recurrence checking for PIPE_ROM = 1 (values of l, w,
 r against the golden model) is cocotb's job, exactly as for PIPE_ROM = 0.
 
-### 8.3 attention_top: 4-row-blocked integration (NORMATIVE, Phase 2)
+### 8.3 attention_top: 4-row-blocked integration
 
 Implementation note (2026-11-08): the dataflow, port protocol and cycle
 formula below are unchanged; the memories, the PV datapath pipeline, the
@@ -765,7 +765,7 @@ negative acc*r floors correctly (6.1). w*v intermediate: 24-bit signed exact
 online_softmax's l_resc truncation (8.2): the 3.7 induction bound guarantees
 the true value always fits.
 
-Divider bank (3.8, rounding site 5, exactly the normative algorithm, no
+Divider bank (3.8, rounding site 5, exactly the specified algorithm, no
 shortcuts): after a row group's last drain (S_DRAIN_LAST below) the row's
 (acc[L][*], l[L]) are stable (no more in_valid pulses touch them), so the
 divisions for that group's 4 rows run sequentially, one row at a time, a
@@ -796,7 +796,7 @@ identical control):
   future optimization, not implemented here.
 
 PIPE_ROM plumbing (2026-09-19): attention_top carries a PIPE_ROM parameter
-(default 0, the normative latency-1 configuration, bit-identical to the
+(default 0, the reference latency-1 configuration, bit-identical to the
 pre-parameter module) forwarded to the four online_softmax lanes. With
 PIPE_ROM = 1 each lane's out_valid arrives two cycles after in_valid, and
 exactly two things travel from the in_valid cycle to the out_valid cycle:

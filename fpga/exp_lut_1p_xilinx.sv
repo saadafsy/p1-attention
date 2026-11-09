@@ -1,10 +1,7 @@
 `timescale 1ns / 1ps
-// exp_lut_1p_xilinx: block-RAM twin of rtl/exp_lut_1p.sv for the Artix-7
-// build (selected by `define XILINX_FPGA in online_softmax.sv). An XPM
-// single-port ROM, 1024 x 16 = one RAMB18 per lane, initialized from
-// fpga/exp_lut.mem (byte-identical to model/exp_lut.hex, checked by
-// model/crosscheck.py). Read latency 1, synchronous reset to 0, same as the
-// portable module.
+// exp_lut_1p_xilinx: XPM block-RAM version of rtl/exp_lut_1p.sv, selected by
+// `define XILINX_FPGA. 1024 x 16 (one RAMB18) from fpga/exp_lut.mem, which
+// must match model/exp_lut.hex. Read latency 1, synchronous reset to 0.
 module exp_lut_1p_xilinx (
     input  logic        clk,
     input  logic        rst,

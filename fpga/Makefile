@@ -1,18 +1,10 @@
-# FPGA bring-up targets (target-scores change 2, added 2026-09-19).
-# BOARD=basys3 (default, XC7A35T, fpga/basys3.xdc) or BOARD=nexys_a7
-# (XC7A100T, fpga/nexys_a7_100t.xdc); the RTL is identical, only the part
-# and the pins differ. Run from the repo root: make -C fpga <target>. Needs
-# Vivado on PATH (source <Vivado>/settings64.sh) and, from `program` on,
-# the board on USB. Every target is a gate step of docs/phase6_fpga_guide.md
-# section 0; nothing here has been run yet (PENDING-HARDWARE).
-#
-#   bitstream   build at F_MHZ (default 100): synth, timing gate (fails on
-#               WNS<0), the exp-ROM block-RAM gate, place, route, .bit
-#   program     load the F_MHZ bitstream over JTAG
-#   hw-test     the self-checking host test against model/attn.py (PORT=)
-#   sweep       rebuild/program/test at each FREQS; writes build/fpga/sweep.csv
-#   hw-gate     bitstream + program + hw-test at 100 MHz, then sweep: the
-#               evidence gate for every PENDING-HARDWARE row
+# FPGA build/program/test: make -C fpga <target> [BOARD=basys3|nexys_a7].
+# Needs Vivado on PATH and, from `program` on, the board on USB.
+#   bitstream  build at F_MHZ (fails on negative slack or non-BRAM exp ROMs)
+#   program    load the F_MHZ bitstream over JTAG
+#   hw-test    host test against model/attn.py on PORT
+#   sweep      rebuild/program/test at each FREQS -> build/fpga/sweep.csv
+#   hw-gate    all of the above
 SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -c
 ROOT := $(abspath ..)

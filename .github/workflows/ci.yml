@@ -1,16 +1,6 @@
-# CI for p1-attention (added 2026-09-19). Proves `make verify` runs on a clean
-# machine, per module in build order, with pinned tools. It runs the public
-# command (not the legs individually) and never mutates the checkout:
-# VERIFY_NO_LEDGER=1 skips the EVIDENCE.md append, and a final
-# `git diff --exit-code` fails the job if any tracked file changed.
-#
-# Status: UNVERIFIED until this workflow has been observed green on GitHub;
-# the README badge shows whatever GitHub reports. The OSS CAD Suite archive
-# is pinned by date; set the OSS_CAD_SHA256 repository variable after the
-# first run prints the digest, and the download is then verified.
-#
-# UVM (tb/uvm) is NOT run here: it needs Vivado xsim, which cannot be
-# installed on a hosted runner (license + ~40 GB). See tb/uvm/README.md.
+# Runs `make verify` per module on a clean runner with pinned tools. VERIFY_NO_LEDGER=1
+# and a final `git diff --exit-code` keep the checkout unmodified.
+# Not yet observed green on GitHub. UVM is not run (needs Vivado xsim; see tb/uvm/README.md).
 name: CI
 
 on:
@@ -26,8 +16,7 @@ env:
 
 jobs:
   toolchain:
-    # Fast fail-first diagnosis: the same tool_smoke gate docs/design_rules.md demands
-    # before any module is touched, plus the pure-Python/Perl gates.
+    # Fail fast: tool_smoke plus the pure-Python/Perl gates.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

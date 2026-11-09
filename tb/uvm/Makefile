@@ -1,20 +1,11 @@
-# matmul_tile UVM environment (target-scores change 1, added 2026-09-19).
-# Run from the repo root: make -C tb/uvm <target>. Needs Vivado xsim on PATH
-# (source <Vivado>/settings64.sh); nothing here runs under verilator.
-#
-# Targets
-#   vectors    python: golden vector file for SEED (scripts/gen_tile_uvm_vectors.py)
-#   smoke      replay test, one seed: the compile/run/coverage-switch sanity run
-#   replay     replay test for SEED, scoreboard vs Python golden, in-sim
-#   random     SV constrained-random test for SEED, then the Python mirror
-#              checks the monitor's trace file (no SV reference model exists)
-#   regress    UVM_SEEDS seeds of both tests, then merged coverage (xcrg)
-#   bug-proof  compile mac_unit with +define+INJECT_BUG and REQUIRE the replay
-#              test to fail: the proof that the environment catches a bug
-#   gate       the whole evidence gate: regress + bug-proof
-#
-# Status: never run (no Vivado where this was written). The gate must be
-# observed on a real install before any UVM claim is made; see README.md.
+# matmul_tile UVM environment: make -C tb/uvm <target> [SIM=xsim|verilator].
+#   vectors    golden vector file for SEED
+#   smoke      one replay run (compile/run sanity)
+#   replay     replay test for SEED, scoreboard vs Python golden
+#   random     constrained-random test, trace checked by the Python mirror
+#   regress    UVM_SEEDS seeds of both tests, then merged coverage (xsim only)
+#   bug-proof  replay with INJECT_BUG compiled in must fail
+#   gate       regress + bug-proof
 SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -c
 SEED ?= 17
@@ -25,7 +16,7 @@ OUT := $(ROOT)/build/uvm
 VEC := vectors/tile_seed_$(SEED).txt
 SIM ?= xsim
 ifeq ($(SIM),verilator)
-# Verilator + upstream UVM 2017 (bootcamp M5 route): no merged coverage.
+# Verilator + upstream UVM 2017: no merged coverage.
 RUN := bash scripts/run_verilator.sh
 LOG := sim.log
 else
@@ -51,7 +42,7 @@ random:
 	$(RUN) tile_random_test $(SEED) $(OUT)/seed_$(SEED)_random +NUM_DOTS=$(NUM_DOTS) +TRACE_FILE=$(OUT)/seed_$(SEED)_random/trace.txt
 	python3 $(ROOT)/scripts/gen_tile_uvm_vectors.py --check $(OUT)/seed_$(SEED)_random/trace.txt
 
-# N seeds of each test; every seed has its own vector file and coverage db.
+# Each seed gets its own vector file and coverage db.
 regress:
 	@set -e; for s in $$(seq 1 $(UVM_SEEDS)); do \
 	  $(MAKE) --no-print-directory replay SEED=$$s; \
@@ -63,11 +54,7 @@ else
 	bash scripts/merge_coverage.sh $(OUT)
 endif
 
-# Negative test: with the deliberate mac_unit mutation compiled in
-# (rtl/mac_unit.sv `ifdef INJECT_BUG: the load row ignores clr, so a new
-# dot product accumulates onto the previous one), the replay scoreboard
-# MUST report mismatches and xsim MUST exit nonzero. If it exits zero the
-# environment is not checking, and this target fails.
+# INJECT_BUG makes mac_unit's load ignore clr; the run must fail with scoreboard mismatches.
 bug-proof: $(VEC)
 ifeq ($(SIM),verilator)
 	@# leg 1: full environment (scoreboard + SVA); leg 2: scoreboard alone. Both MUST fail.

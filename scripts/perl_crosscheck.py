@@ -1,19 +1,8 @@
 #!/usr/bin/env python3
-"""Prove the Perl ports of gen_gls_vectors and toggle_count agree with the
-Python originals byte for byte (`make perl-crosscheck`).
+"""Check the Perl ports of gen_gls_vectors and toggle_count match Python byte for byte.
 
-1. gen_gls_vectors: Python generates build/perl-crosscheck/gls_stim.hex plus
-   its two expected files; Perl consumes the SAME stimulus and writes its
-   two expected files into a sibling directory; the pairs are compared.
-   (Python's Mersenne-Twister stream is not reproducible from Perl, so the
-   stimulus is shared, and what is proven is that both spec mirrors agree
-   on every one of the 549 cycles, both latencies.)
-2. toggle_count: a small deterministic synthetic VCD (scalars, vectors,
-   x/z edges, width growth) is written here, both counters are run on it,
-   and their stdout is compared. The GLS VCDs themselves are not needed, so
-   this runs in CI without the PDK.
-
-Exit 0 only if both comparisons match.
+GLS vectors: Perl consumes Python's stimulus and the expected files are compared.
+toggle_count: both run on a synthetic VCD (no PDK needed). Exit 0 only if both match.
 """
 import filecmp
 import pathlib

@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Artix-7 resource estimate for the FPGA top (fpga/attn_uart_top.sv) with
-# yosys synth_xilinx, no Vivado needed. Confirms the memories and exp ROMs
-# map to block RAM and the multipliers to DSP48E1. It is a synthesis-only
-# count: no placement, no timing (Fmax on the FPGA needs Vivado, see
-# fpga/scripts/build.tcl). Output: build/fpga_resources.txt.
+# Artix-7 resource estimate for fpga/attn_uart_top.sv with yosys synth_xilinx (no Vivado).
+# Synthesis-only count (BRAM, DSP48E1, LUTs); no placement or timing. Output: build/fpga_resources.txt.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build

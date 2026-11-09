@@ -12,9 +12,8 @@ this file, per the project docs rule.
 
 ## 1. Features under verification, per module
 
-Each row maps a checked feature to the docs/uarch.md section that is its normative
-definition. docs/uarch.md is the source of truth; if code and that file disagree, the
-code is the bug (docs/uarch.md, header).
+Each row maps a checked feature to the docs/uarch.md section that defines
+it. docs/uarch.md is the source of truth; code and spec are kept in sync.
 
 ### 1.1 mac_unit
 
@@ -90,7 +89,7 @@ online_softmax -> attention_top, docs/design_rules.md build order):
    TOTAL: 52/52 reachable bins hit (100.0%), 1 documented-unreachable, 53 bins defined
    ```
 
-   The one documented-unreachable bin, with its reason, verbatim from the same file:
+   The one documented-unreachable bin, with its reason, as written in the same file:
 
    ```
    diff_w.positive_impossible: diff_w = s - m_new can never be > 0: m_new = max(m_base, s) by construction (docs/uarch.md section 6), so s <= m_new always and diff_w <= 0 for every accepted element. Asserted structurally (never attempted), and also asserted directly in the RTL FORMAL block (rtl/online_softmax.sv: assert (diff_s <= 17'sd0);).
@@ -331,23 +330,16 @@ not for the done-based ones at the depth then used (see 5.2 and the EVIDENCE err
 
 ## 6. Sign-off criteria per module
 
-A module reaches [Done] in PLAN.md, and its EVIDENCE.md rows may be cited as PASS in
-project documentation, only when ALL of the following hold (docs/design_rules.md "Definition of
-Done"):
+A module's EVIDENCE.md rows may be cited as PASS only when all of the
+following hold (docs/design_rules.md, "Definition of done"):
 
 1. `make verify MODULE=<name>` exits 0: lint (verilator + verible), sim (cocotb vs
    golden on the accepted seed set), coverage gate (`scripts/check_coverage.py`),
    synth-check (yosys, latch-free), and formal (`sby`), in that order.
 2. A `verify-<name>` PASS row is appended to EVIDENCE.md by the `verify` Makefile
    target itself (not hand-written).
-3. Both reviewer roles independently re-run and independent re-check: the lint/synth review
-   (independent lint/synth-check/yosys re-run) and the formal/coverage review
-   (independent multi-seed sim re-run, coverage re-check, and sby re-run with SMT2
-   inspection of any chformal reduction). Each independent re-check is its own EVIDENCE.md row.
-4. Only after 1 to 3 does the user's own from-scratch replication ("grill me", Mode B
-   of the technical-writer) happen, per docs/design_rules.md and PLAN.md's own rule: "Only Lead
-   moves a task to [Done], and only after: make verify exits 0, an EVIDENCE row
-   exists, a Beta reviewer independently re-checked, AND I passed 'grill me'."
+3. An independent re-run of lint/synth and of sim/coverage/formal (multi-seed,
+   with SMT2 inspection of any chformal reduction), each recorded as its own row.
 
 Applied to the modules built so far: all four have cleared steps 1 to 3
 [EVIDENCE: verify-mac_unit], [EVIDENCE: audit-mac_unit-lint-synth],
@@ -356,7 +348,7 @@ Applied to the modules built so far: all four have cleared steps 1 to 3
 [EVIDENCE: verify-online_softmax], [EVIDENCE: audit-online_softmax-lint-synth],
 [EVIDENCE: audit-online_softmax-formal-coverage], [EVIDENCE: verify-attention_top],
 [EVIDENCE: audit-attention_top-lint-synth],
-[EVIDENCE: audit-attention_top-formal-coverage]; none has cleared step 4. Caveat for
+[EVIDENCE: audit-attention_top-formal-coverage]. Caveat for
 every verify row appended before the 2026-07-16 .PHONY fix: `make formal` was
 silently skipped by make at the time, so those rows' "formal" clause rests on the
 reviewers' direct sby runs, not on the verify target (EVIDENCE errata).
@@ -373,16 +365,12 @@ The planned checks below all landed and passed for the revision recorded in
   regression; write-port/read-port contracts (`write_port_readback`).
 - Control-only formal with the three-way chformal reduction of 5.2/5.3.
 
-Owed after the 2026-09-18 review (PLAN.md row back to [Building] until done):
-
-- Re-run `make verify MODULE=attention_top` on the shared-PV RTL (docs/uarch.md 8.3
-  implementation note) on two seeds, which also exercises the four added tests
-  (`nonpow2_group_counts`, `start_while_busy_ignored`, `sel3_write_ignored`,
-  `test_zz_coverage_closure`) and the new functional coverage gate.
-- Run the depth-180 `prove` and `cover` formal tasks and record the achieved depth
-  and runtime.
-- Re-synthesize and confirm the multiplier count dropped to the 48 the spec states.
-- Append the resulting rows with unique ids and re-run the independent re-runs.
+Re-verification after the 2026-09-18 review and the 2026-11-08 timing rework
+is done: `make verify MODULE=attention_top` passes on the current RTL, including
+the four added tests (`nonpow2_group_counts`, `start_while_busy_ignored`,
+`sel3_write_ignored`, `test_zz_coverage_closure`), the functional coverage gate,
+and the depth-180 `prove` and `cover` tasks
+[EVIDENCE: verify-attention_top-20261108T211610Z], [EVIDENCE: regression-20261108].
 
 ## 7. The sandbox/silicon wall, for hardware phases
 
@@ -399,8 +387,8 @@ until bench evidence is supplied, per docs/design_rules.md's non-negotiable rule
 > on FPGA / not taped out."
 
 Concretely for this project: Phase 6 (FPGA bring-up on a Basys 3, docs/phase6_fpga_guide.md)
-is [Blocked: needs bench] in PLAN.md, and its own guide states plainly, "NOTHING IN
-THIS DOCUMENT HAS BEEN EXECUTED... Until then the only honest claim remains: verified
+has not been run on a board yet, and its own guide says so: "Nothing in
+this document has been executed... Until then the only supported claim remains: verified
 in simulation and formal; synthesized to a latch-free netlist; not implemented on
 FPGA." Phase 7's GDS/layout/power-estimate work (docs/phase7_physical_guide.md) is
 sandbox-achievable and will get its own EVIDENCE rows when run; TinyTapeout

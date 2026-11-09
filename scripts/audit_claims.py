@@ -1,21 +1,9 @@
 #!/usr/bin/env python3
 """Hardware/silicon claim audit for the claim documents (make audit-guide).
 
-Replaces the original Makefile grep (2026-09-18, review findings L10/F011),
-which exempted any LINE containing "pending" or "in simulation" regardless
-of what the qualifier applied to, so "runs on the real board; simulation is
-pending" passed as clean. This script works per SENTENCE and only accepts a
-prohibited verb when the SAME sentence carries an explicit interim
-qualifier, a negation, or a conditional/instructional framing.
-
-Files audited: docs/guide.md, README.md, docs/uarch.md, docs/benchmark.md,
-docs/tradeoffs.md, docs/verification_plan.md (the documents that make
-result claims). The two forward-looking manuals (docs/phase6_fpga_guide.md,
-docs/phase7_physical_guide.md) open with a PENDING banner and are checked
-only for the banner's presence: they are instructions, and instructions are
-full of the verbs a result claim must not use.
-
-Exit 1 on any unqualified claim, printing file:line and the sentence.
+A prohibited verb passes only if its own clause carries an interim qualifier,
+a negation or a conditional framing. The phase 6/7 manuals are checked only
+for their PENDING banner. Exit 1 on any unqualified claim (file:line, clause).
 """
 import re
 import sys
@@ -48,14 +36,7 @@ ALLOWED = re.compile(
 )
 
 def sentences(text):
-    """Yield (first_lineno, clause). Markdown wraps sentences across lines,
-    so lines are first joined into paragraphs (blank line, heading, list
-    item or table row starts a new one); paragraphs are then split into
-    sentences, and sentences into clauses at ';' and ' -- ' so a qualifier
-    in a neighbouring clause cannot launder a positive claim ("runs on the
-    FPGA at 100 MHz; simulation is pending" is two clauses, and the first
-    one fails). A qualifier inside the same clause is still accepted: this
-    is a heuristic gate, tighter than a line grep, not a parser."""
+    """Yield (first_lineno, clause): paragraphs split into sentences, then clauses at ';' and ' -- '."""
     para, start = [], None
     def flush():
         if para:

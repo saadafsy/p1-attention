@@ -1,29 +1,7 @@
-"""online_softmax testbench: checks the RTL per-row online-softmax (m, l)
-state machine against the golden-model recurrence (docs/uarch.md 8.2, the
-exact equations of section 6, built directly from model/attn.py's
-lut_index/rshr/gen_exp_lut -- those ARE the golden reference, not
-re-derived here).
-
-ROM equivalence is checked TWICE, at two different levels of the flow:
-  1. A pure-Python, non-simulation check (rtl/exp_lut.svh vs
-     model/exp_lut.hex vs model/attn.py's gen_exp_lut(), plus the
-     docs/uarch.md 3.5 sha256 pin) executed at TB import time, so a wrong
-     .svh fails before any simulation even starts.
-  2. In-sim spot checks of w against lut[idx] at chosen indices, proving
-     the RTL's own combinational ROM (not just the two source files)
-     produces the right value end to end.
-
-Mirror model: SoftmaxMirror below reproduces the RTL bit for bit, including
-the row_start basis override and the "hold when !in_valid" behavior (w, r,
-m, l all hold their previous register value, out_valid drops), matching
-the cycle diagram in docs/uarch.md 8.2. The DEN width bound
-0 <= l < 2^24 (uarch.md 3.6) is asserted on every mirror step, not just at
-the end of a row.
-
-Drive on RisingEdge, sample on FallingEdge (post-NBA, stable), same house
-style as tb/matmul_tile/test_matmul_tile.py. Seed plumbing: every RNG is
-built from cocotb.RANDOM_SEED via seeded_rng(), so SEED=1 vs SEED=7
-provably changes stimulus (same pattern as tb/matmul_tile).
+"""online_softmax testbench: checks m, l, w, r, out_valid every cycle against
+a mirror of docs/uarch.md 8.2 built from model/attn.py. The ROM sources
+(exp_lut.svh, exp_lut.hex, gen_exp_lut, sha256 pin) are cross-checked at
+import time. Drive on RisingEdge, sample on FallingEdge.
 """
 
 import hashlib
@@ -36,7 +14,6 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import FallingEdge, RisingEdge
 
-# ---- Import the golden model directly (repo-root relative) ----------------
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "model"))
 import attn  # noqa: E402
@@ -53,7 +30,7 @@ EXP_ONE = attn.EXP_ONE
 DEN_MOD = 1 << 24
 
 
-# ---- ROM equivalence: non-simulation check, run at TB import time ---------
+# ---- ROM source equivalence, checked at import time ----
 def _parse_hex(path):
     vals = []
     for line in path.read_text().splitlines():
@@ -84,14 +61,12 @@ def _check_rom_sources():
     )
     assert hex_lut == svh_lut, (
         "model/exp_lut.hex and rtl/exp_lut.svh diverge entry-for-entry "
-        "(as-built RTL ROM does not match the normative table)"
+        "(RTL ROM does not match the reference table)"
     )
     assert hex_lut == LUT, (
         "model/exp_lut.hex diverges from model/attn.py gen_exp_lut()"
     )
-    # Hash LF-normalized bytes: the pin is over the canonical LF file
-    # (.gitattributes enforces LF, but a CRLF checkout must not turn a
-    # correct table into a false pin failure; 2026-09-18 review finding M5).
+    # The pin is over LF bytes, so a CRLF checkout must not fail it.
     canonical = HEX_PATH.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
     digest = hashlib.sha256(canonical).hexdigest()
     assert digest == PINNED_SHA256, (
@@ -100,7 +75,7 @@ def _check_rom_sources():
     )
 
 
-_check_rom_sources()  # executed at import/collection time, before any sim
+_check_rom_sources()
 
 
 # ---- Bit-width helpers ------------------------------------------------------
@@ -117,19 +92,16 @@ def wrap16(x):
 
 
 def seeded_rng():
-    """Build an RNG from cocotb's per-test seed (house style, see
-    tb/matmul_tile/test_matmul_tile.py docstring for the full rationale)."""
+    """RNG seeded from cocotb.RANDOM_SEED."""
     seed = getattr(cocotb, "RANDOM_SEED", None)
     if seed is None:
-        seed = 1  # defensive fallback only; COCOTB_RANDOM_SEED is always set
+        seed = 1
     return random.Random(seed)
 
 
-# ---- Golden step function, built directly from model/attn.py --------------
+# ---- Golden step function ----
 def softmax_step(m, l, s, row_start):
-    """One step of docs/uarch.md section 6 / 8.2, built directly from
-    model/attn.py's lut_index/rshr/gen_exp_lut. Returns (m_new, l_new, w, r).
-    Asserts the DEN width bound (uarch.md 3.6) on every call."""
+    """One uarch.md section 6 step; returns (m_new, l_new, w, r)."""
     m_base = M_INIT if row_start else m
     l_base = 0 if row_start else l
     m_new = m_base if m_base >= s else s
@@ -143,8 +115,7 @@ def softmax_step(m, l, s, row_start):
 
 
 class SoftmaxMirror:
-    """Bit-exact software mirror of the RTL registers (m, l, w, r,
-    out_valid), including the hold-on-!in_valid behavior."""
+    """Bit-exact mirror of m, l, w, r, out_valid; holds when !in_valid."""
 
     def reset(self):
         self.m = M_INIT
@@ -161,7 +132,7 @@ class SoftmaxMirror:
         self.out_valid = bool(in_valid)
 
 
-# ---- DUT drive/check helpers ------------------------------------------------
+# ---- DUT drive/check helpers ----
 async def start_and_reset(dut):
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     dut.rst.value = 1
@@ -203,13 +174,7 @@ async def drive_and_check(dut, mirror, in_valid, row_start, s, msg):
 # ---- Tests -------------------------------------------------------------------
 @cocotb.test()
 async def reset_and_first_element_identity(dut):
-    """After rst: m == -32768, l == 0, out_valid == 0 (section 6 init).
-    First accepted element of a row (identity 2, uarch.md 6.1): m == s0 and
-    l == 32768 and w == lut[0] == 32768 ALWAYS (independent of s0, since
-    diff_s = s0 - m_new = 0 exactly); r is checked against the mirror
-    rather than hand-assumed, since it is 0 only when the (m_base - s0)
-    clamp saturates the LUT's zero tail, which the mirror computes, not
-    guesses."""
+    """Reset state, then a row's first element gives m == s0, l == w == 32768 for any s0."""
     await start_and_reset(dut)
     mirror = SoftmaxMirror()
     mirror.reset()
@@ -227,16 +192,11 @@ async def reset_and_first_element_identity(dut):
 
 @cocotb.test()
 async def rom_lookup_spot_checks(dut):
-    """In-sim spot checks of the RTL's own combinational ROM: establish a
-    known running max (m = 0 via row_start), then drive scores that hit
-    exact LUT indices 0, 1, 64, 128, 256, 443, 512, 709, 710, 1023 (the
-    docs/uarch.md 3.5 anchor entries plus the zero-tail boundary), checking
-    w against lut[idx] exactly every time."""
+    """With m = 0, w equals lut[idx] at the uarch.md 3.5 anchors and the zero-tail edge."""
     await start_and_reset(dut)
     mirror = SoftmaxMirror()
     mirror.reset()
 
-    # Establish m = 0, l = 32768 via row_start with s0 = 0.
     await drive_and_check(dut, mirror, True, True, 0, "spot-check row start (m=0)")
     assert mirror.m == 0
 
@@ -247,7 +207,7 @@ async def rom_lookup_spot_checks(dut):
         assert computed_idx == idx, (
             f"index math self-check: lut_index({diff}) = {computed_idx} != {idx}"
         )
-        s = mirror.m + diff  # mirror.m stays 0 throughout (diff <= 0 always)
+        s = mirror.m + diff  # m stays 0 since diff <= 0
         await drive_and_check(dut, mirror, True, False, s, f"spot-check idx={idx}")
         assert mirror.m == 0, "spot-check setup error: m must not move"
         assert int(dut.w.value) == LUT[idx], (
@@ -258,22 +218,14 @@ async def rom_lookup_spot_checks(dut):
 
 @cocotb.test()
 async def rom_full_sweep(dut):
-    """Exhaustive sweep of all 1024 possible LUT indices, i.e. every case
-    arm of the generated exp_lut_rom (rtl/exp_lut.svh), checking w against
-    lut[idx] exactly at each one. Added because verilator --coverage-line
-    instruments each of the 1024 generated case-assignment lines as a
-    separate coverage point: the 10-point spot check above leaves 1014 of
-    them formally unexercised, which is a real coverage gap (found by
-    running scripts/check_coverage.py: 85.3% line coverage, all 156
-    zero-hit points inside exp_lut.svh), not a cosmetic one. This test
-    closes it without weakening any check elsewhere."""
+    """All 1024 LUT indices (every exp_lut_rom case arm, for line coverage)."""
     await start_and_reset(dut)
     mirror = SoftmaxMirror()
     mirror.reset()
     await drive_and_check(dut, mirror, True, True, 0, "sweep row start (m=0)")
     for idx in range(1024):
         diff = -16 * idx
-        s = mirror.m + diff  # mirror.m stays 0 throughout (diff <= 0 always)
+        s = mirror.m + diff
         await drive_and_check(dut, mirror, True, False, s, f"sweep idx={idx}")
         assert int(dut.w.value) == LUT[idx], (
             f"sweep idx {idx}: rtl w={int(dut.w.value)} != lut[{idx}]={LUT[idx]}"
@@ -282,13 +234,10 @@ async def rom_full_sweep(dut):
 
 @cocotb.test()
 async def directed_sequences(dut):
-    """Strictly increasing (genuine rescale every step), strictly
-    decreasing (r stays the exact identity 0x8000, l == sum of w's),
-    constant score, domain clamp (diff < -16384), and SCORE extremes."""
+    """Increasing, decreasing and constant rows, domain clamp, score extremes."""
     await start_and_reset(dut)
 
-    # Strictly increasing: max updates every step, real rescale (r < 0x8000)
-    # every step after the first.
+    # Increasing: a real rescale every step after the first.
     mirror = SoftmaxMirror()
     mirror.reset()
     scores = [-20000 + 200 * i for i in range(40)]
@@ -299,9 +248,7 @@ async def directed_sequences(dut):
                 f"increasing[{i}]: expected a genuine rescale (r != 0x8000)"
             )
 
-    # Strictly decreasing: after the first element sets the max, every
-    # later step keeps r == 0x8000 exactly (identity 1, uarch.md 6.1); l
-    # must equal the exact sum of all w's with zero drift.
+    # Decreasing: r stays 0x8000 (uarch.md 6.1), so l is the exact sum of w.
     mirror = SoftmaxMirror()
     mirror.reset()
     scores = [20000 - 300 * i for i in range(40)]
@@ -316,7 +263,6 @@ async def directed_sequences(dut):
     assert mirror.l == w_sum, f"identity-1 check: l={mirror.l} != sum(w)={w_sum}"
     assert int(dut.l.value) == w_sum
 
-    # Constant score: max set once, then identity holds every later step.
     mirror = SoftmaxMirror()
     mirror.reset()
     for i in range(20):
@@ -324,14 +270,8 @@ async def directed_sequences(dut):
         if i > 0:
             assert int(dut.r.value) == 0x8000, f"constant[{i}]: r != identity"
 
-    # Domain clamp: diff well below -16384 (functional clamp, uarch.md 5).
-    # s is driven far below the established max, so it is diff_s = s - m_new
-    # (which feeds w, this element's own weight) that saturates the LUT zero
-    # tail; diff_m = m_base - m_new stays 0 (m does not move), so r stays the
-    # exact identity 0x8000, not the clamp value. Getting this pairing right
-    # (w vs r) is the point of the earlier test-authoring bug this comment
-    # documents: an initial version of this test asserted r == 0 here, which
-    # failed because it clamped the wrong one of the two diffs.
+    # Domain clamp: diff_s (feeds w) clamps to the zero tail; m does not
+    # move, so diff_m == 0 and r stays 0x8000.
     mirror = SoftmaxMirror()
     mirror.reset()
     await drive_and_check(dut, mirror, True, True, 32767, "clamp row-start (m=32767)")
@@ -339,7 +279,6 @@ async def directed_sequences(dut):
     assert int(dut.w.value) == 0, "clamp: w should hit the LUT zero tail"
     assert int(dut.r.value) == 0x8000, "clamp: r should stay identity (m did not move)"
 
-    # SCORE extremes at row start (+/-32767, -32768).
     for s0 in (32767, -32768, -32767, 32766):
         mirror = SoftmaxMirror()
         mirror.reset()
@@ -348,10 +287,7 @@ async def directed_sequences(dut):
 
 @cocotb.test()
 async def full_row_golden_compare(dut):
-    """100 random rows of length 1..64, SCORE-range values, idle gaps
-    randomly interleaved, some rows back to back with no dead cycle.
-    Compares (m, l, w, r, out_valid) every single cycle against the
-    mirror, not just at row boundaries."""
+    """100 random rows of length 1..64 with random idle gaps and back-to-back rows."""
     await start_and_reset(dut)
     mirror = SoftmaxMirror()
     mirror.reset()
@@ -381,10 +317,7 @@ async def full_row_golden_compare(dut):
 
 @cocotb.test()
 async def realistic_flow_vs_attn_trace(dut):
-    """2 random N=16 attention cases: real score streams via model/attn.py
-    (sacc -> s per uarch.md 3.3, s = sat(rshr(sacc, 2+D_SHIFT), ...)), fed
-    row by row; final l per row checked against attn_fixed's trace= hook
-    (the same golden model that will gate attention_top later)."""
+    """Two N=16 attention score streams; final l per row vs attn_fixed's trace."""
     await start_and_reset(dut)
     mirror = SoftmaxMirror()
     mirror.reset()
@@ -419,12 +352,7 @@ async def realistic_flow_vs_attn_trace(dut):
 
 @cocotb.test()
 async def random_control_fuzz(dut):
-    """2000 cycles of fully random in_valid/row_start/s vs the mirror,
-    checked every cycle, including that (m, l) hold exactly when
-    in_valid == 0 and out_valid drops. Row length is capped (forced
-    row_start) at 60 elements to stay well under the 256-row bound the
-    DEN width proof relies on (uarch.md 3.6), per the house rule to keep
-    row lengths <= 256 everywhere in this TB."""
+    """2000 random cycles; rows capped at 60 to stay under the 256-row DEN bound."""
     await start_and_reset(dut)
     mirror = SoftmaxMirror()
     mirror.reset()

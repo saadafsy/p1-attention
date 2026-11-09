@@ -1,20 +1,9 @@
 #!/usr/bin/env perl
-# Perl port of scripts/gen_gls_vectors.py (2026-09-19): the port-level
-# mirror of docs/uarch.md 8.2 / 8.2.1 that turns a stimulus file into the
-# per-cycle expected port values for PIPE_ROM=0 (latency 1) and PIPE_ROM=1
-# (latency 2). It reimplements lut_index and rshr bit-exactly and reads the
-# tracked model/exp_lut.hex (the normative table) instead of recomputing
-# exponentials, so every arithmetic step is integer and reproducible.
-#
-# The Python version stays the reference. Python's Mersenne-Twister
-# stimulus stream cannot be reproduced from Perl, so this script CONSUMES a
-# stimulus file (`--stim`, default build/gls_stim.hex as written by the
-# Python generator) and emits the two expected files; `make perl-crosscheck`
-# compares them byte for byte against the Python output for the same
-# stimulus. That is the evidence that the two mirrors agree.
-#
-# Usage: perl scripts/gen_gls_vectors.pl [--stim build/gls_stim.hex]
-#            [--out-dir build] [--lut model/exp_lut.hex]
+# Perl port of scripts/gen_gls_vectors.py: reads a stimulus file and the tracked
+# model/exp_lut.hex and writes the expected GLS port vectors for PIPE_ROM=0 and 1.
+# It consumes the Python stimulus (Mersenne-Twister is not reproducible here);
+# `make perl-crosscheck` compares both outputs byte for byte.
+# Usage: perl scripts/gen_gls_vectors.pl [--stim build/gls_stim.hex] [--out-dir build] [--lut model/exp_lut.hex]
 use strict;
 use warnings;
 use Getopt::Long;
@@ -25,14 +14,14 @@ my $lut_hex = 'model/exp_lut.hex';
 GetOptions('stim=s' => \$stim, 'out-dir=s' => \$out_dir, 'lut=s' => \$lut_hex)
     or die "usage: $0 [--stim FILE] [--out-dir DIR] [--lut FILE]\n";
 
-# ---- normative constants (model/attn.py) -------------------------------
+# ---- constants (model/attn.py) -----------------------------------------
 use constant M_INIT         => -32768;
 use constant W_FRAC         => 15;
 use constant LUT_SIZE       => 1024;
 use constant LUT_STEP_SHIFT => 4;
 use constant LUT_DOMAIN_RAW => -16384;
 
-# ---- LUT from the tracked normative hex --------------------------------
+# ---- LUT from the tracked hex ------------------------------------------
 my @LUT;
 {
     open(my $fh, '<', $lut_hex) or die "cannot open $lut_hex: $!";
@@ -55,9 +44,7 @@ sub lut_index {
 }
 
 sub rshr {
-    # round-half-up arithmetic right shift; only ever called with x >= 0 here
-    # (l * r), so integer division equals the floor shift. Guarded so a
-    # negative operand can never silently truncate toward zero.
+    # round-half-up shift; x = l*r >= 0, so int() equals floor (negatives would truncate, hence the die)
     my ($x, $k) = @_;
     die "rshr: negative operand $x not supported in this mirror\n" if $x < 0;
     return int(($x + (1 << ($k - 1))) / (1 << $k));
@@ -137,19 +124,16 @@ sub expected_lat2 {
 }
 
 # ---- emit (identical formatting to the Python generator) ---------------
-# 73-bit word: {m[15:0], l[23:0], r[15:0], w[15:0], out_valid}; Perl's native
-# integers are 64-bit, so the word is assembled as two hex halves.
+# 73-bit word {m, l[23:0], r, w, out_valid} exceeds Perl's 64-bit ints, so it is printed as two hex halves.
 sub emit {
     my ($path, $rows) = @_;
     open(my $fh, '>', $path) or die "cannot write $path: $!";
     binmode $fh;
     for my $row (@$rows) {
         my ($m, $l, $r, $w, $ov) = @$row;
-        # low 33 bits: r(16) | w(16) | ov(1)  ; high 40 bits: m(16) | l(24)
         my $lo = ($r << 17) | ($w << 1) | $ov;            # < 2^33
         my $hi = (to_u16($m) << 24) | $l;                  # < 2^40
-        # 19 hex digits total = 76 bits; hi occupies digits above bit 33.
-        # value = hi << 33 | lo. Split at a nibble boundary: bits [75:36] and [35:0].
+        # value = hi << 33 | lo, split at a nibble boundary: bits [75:36] and [35:0]
         my $top = ($hi >> 3);                              # bits 75..36 (40 bits)
         my $bot = (($hi & 7) << 33) | $lo;                 # bits 35..0  (36 bits)
         printf $fh "%010x%09x\n", $top, $bot;

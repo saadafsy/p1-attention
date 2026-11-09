@@ -1,47 +1,7 @@
-"""cocotb testbench for attn_uart_top (Phase 6 bring-up kit). Verifies the
-byte protocol NORMATIVE at docs/phase6_fpga_guide.md 6.3.4 end to end against
-attention_top's own golden reference, model/attn.py attn_fixed.
-
-This testbench does NOT reimplement the wire protocol: it imports the pure
-frame builder/parser functions (build_ping, build_load_row, build_set_nlen,
-build_run, build_status, build_read_out, build_read_cycles, build_resync_frame,
-parse_status, decode_out_row, decode_cycles, is_nak, is_resynced) directly
-from fpga/host/attn_host.py, so the exact code the user will run at the bench
-is what gets exercised here. Only the PHYSICAL bit-banging of the 8N1 line
-(something pyserial does for the real host, and a real OS serial port has no
-simulation equivalent) is implemented locally, in UartTbLink below; it
-drives/samples ONLY the DUT's uart_rx input pin and uart_tx output pin, plus
-clk/rst_btn -- never anything inside attn_uart_top or attention_top.
-
-CLK_HZ/BAUD: overridden by the Makefile to 1_600_000 / 100_000
-(ClksPerBit = 16, the minimum the uart_rx/uart_tx elaboration-time check
-allows, guide 6.3.3) purely to keep sim time sane; see the Makefile comment.
-The clock PERIOD driven from Python must correspond to that same CLK_HZ
-(625 ns), or the simulated "clocks per bit" the RTL divider actually uses
-would not match ClksPerBit here.
-
-No verilator --coverage in this directory (Makefile comment): instead, a
-simple set-based check (test_zz_coverage_closure, the LAST test in this
-file) fails loudly if any protocol command class was never exercised across
-the whole regression. cocotb's RegressionManager registers tests in module
-declaration order (vars(mod) preserves insertion order; start_regression
-only stable-sorts by `stage`, which defaults equal for all tests here), so
-declaring the closure check last in this file is sufficient for it to see
-everything the earlier tests recorded into the module-level EXERCISED set.
-
-Concurrency note (review finding, framing/resync tests): a plain "write a
-burst, then recv_byte() once" pattern MISSES anything the DUT transmits
-WHILE this TB's own coroutine is still busy driving uart_rx (this Python
-coroutine cannot listen and drive at the same time). Real hardware has no
-such gap -- pyserial's OS-buffered RX is continuously live in the background
-regardless of what the host's write() is doing -- so this is a
-simulation-only concern, handled here by UartTbLink.start_monitor(), a
-background cocotb Task that keeps receiving bytes while the foreground
-coroutine does something else.
-
-Seed plumbing: same house style as tb/attention_top -- every RNG is built
-from cocotb.RANDOM_SEED via seeded_rng(), so SEED=1 vs SEED=7 provably
-changes stimulus.
+"""cocotb testbench for attn_uart_top: runs the byte protocol of
+docs/phase6_fpga_guide.md 6.3.4 end to end against model/attn.py attn_fixed.
+Frames are built/parsed by the shipped fpga/host/attn_host.py; only the 8N1
+pin bit-banging (UartTbLink) is local. Tests run in declaration order.
 """
 
 import pathlib
@@ -56,43 +16,41 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "fpga" / "host"))
 sys.path.insert(0, str(ROOT / "model"))
 import attn as attn_model  # noqa: E402
-import attn_host  # noqa: E402  (the SHIPPED host script; frame fns imported)
+import attn_host  # noqa: E402
 
 LUT = attn_model.gen_exp_lut()
-D = attn_model.D_DIM  # 16, docs/uarch.md section 1
+D = attn_model.D_DIM
 
+# Must match the Makefile -G overrides; 16 clocks/bit is the RTL minimum.
 CLK_HZ = 1_600_000
 BAUD = 100_000
-CLKS_PER_BIT = CLK_HZ // BAUD  # 16, matches the Makefile -G overrides
+CLKS_PER_BIT = CLK_HZ // BAUD
 assert CLKS_PER_BIT == 16, "test CLK_HZ/BAUD must match the Makefile -G overrides"
-CLK_PERIOD_NS = 1_000_000_000.0 / CLK_HZ  # 625.0 ns
+CLK_PERIOD_NS = 1_000_000_000.0 / CLK_HZ
 
 REQUIRED_COMMANDS = {
     "PING", "LOAD_Q", "LOAD_K", "LOAD_V", "SET_NLEN", "RUN",
     "STATUS", "READ_OUT", "READ_CYCLES", "NAK_UNKNOWN", "NAK_BUSY", "RESYNC",
     "NAK_LOAD_BUSY", "NAK_NLEN_INVALID", "NAK_READ_BUSY",
 }
-EXERCISED = set()  # module-level: shared across every test in this file
+EXERCISED = set()  # shared across every test in this file
 
-# One failed uart_rx receive attempt (guide 6.3.3): start(clks) + 8 data
-# cells(clks) + stop-vote cells (Mid+Step+1), all at ClksPerBit granularity.
-# Used to size the break/silence stimuli in test_framing_error_resilience.
+# One failed uart_rx attempt: start + 8 data cells + stop vote (guide 6.3.3).
 _MID = CLKS_PER_BIT // 2
 _STEP = max(CLKS_PER_BIT // 16, 1)
 FAILED_ATTEMPT_CYCLES = 9 * CLKS_PER_BIT + (_MID + _STEP + 1)
 
 
 def seeded_rng():
-    """Build an RNG from cocotb's per-test seed (house style, see
-    tb/matmul_tile/test_matmul_tile.py docstring for the full rationale)."""
+    """RNG seeded from cocotb.RANDOM_SEED."""
     seed = getattr(cocotb, "RANDOM_SEED", None)
     if seed is None:
-        seed = 1  # defensive fallback only; COCOTB_RANDOM_SEED is always set
+        seed = 1
     return random.Random(seed)
 
 
 def cycle_formula(n_len):
-    """docs/uarch.md 8.3, same closed form as tb/attention_top."""
+    """Cycle count closed form, docs/uarch.md 8.3."""
     nblk = n_len // 4
     return nblk * (16 * nblk + 156) + 1
 
@@ -108,13 +66,10 @@ def random_qkv(rng, n, d=D):
     return q, k, v
 
 
-# ---- Physical-layer bit-banger (TB-only; NOT part of the shipped host) ----
+# ---- Physical-layer bit-banger (TB only) ----
 class UartTbLink:
-    """Drives/samples ONLY the DUT's uart_rx/uart_tx pins, 8N1, ClksPerBit
-    clocks per bit cell (same framing fpga/uart_rx.sv and fpga/uart_tx.sv
-    implement, guide 6.3.3). This class exists only because a cocotb sim has
-    no real OS serial port for pyserial to open; the actual protocol framing
-    for every command below comes from the imported attn_host functions."""
+    """8N1 bit-banger on the DUT's uart_rx/uart_tx pins (stands in for
+    pyserial, which has no simulated serial port)."""
 
     def __init__(self, dut, clks_per_bit=CLKS_PER_BIT):
         self.dut = dut
@@ -133,25 +88,14 @@ class UartTbLink:
             await self.send_byte(b)
 
     async def drive_line_low(self, cycles):
-        """Raw wire-level stimulus: hold uart_rx low for `cycles` clocks,
-        then release to idle-high. No framing assumed at this layer -- used
-        to build both a sub-bit-cell glitch (false start, guide 6.3.3: "a
-        false start returns to idle and emits nothing") and a break that
-        outlasts a full failed-attempt window (guide 6.3.3: "the receiver
-        returns to idle right after the stop vote" and, seeing rx still
-        low, immediately starts ANOTHER attempt) -- see
-        test_framing_error_resilience for both cases and why each duration
-        was chosen."""
+        """Hold uart_rx low for `cycles` clocks, then release to idle-high."""
         self.dut.uart_rx.value = 0
         for _ in range(cycles):
             await RisingEdge(self.dut.clk)
         self.dut.uart_rx.value = 1
 
     def start_monitor(self):
-        """Fork a background task that continuously calls recv_byte() into
-        a growing list, so nothing transmitted while THIS coroutine is
-        still driving uart_rx (a break, a resync burst) is missed. See the
-        module docstring's concurrency note."""
+        """Receive in a background task, so bytes sent while we drive uart_rx are not missed."""
         captured = []
 
         async def _run():
@@ -162,9 +106,7 @@ class UartTbLink:
         return _RxMonitor(task, captured)
 
     async def recv_byte(self):
-        """Detect the start-bit falling edge on uart_tx, then sample the
-        middle of each subsequent ClksPerBit-wide cell (data LSB first,
-        matching fpga/uart_tx.sv's {stop, data, start} shift order)."""
+        """Wait for the start edge on uart_tx, then sample each bit cell, LSB first."""
         prev = 1
         while True:
             await FallingEdge(self.dut.clk)
@@ -188,11 +130,8 @@ class UartTbLink:
 
 
 class _RxMonitor:
-    """Handle for a UartTbLink.start_monitor() background task: `captured`
-    grows live as bytes arrive; stop() kills the task and returns everything
-    seen so far. Real hardware needs no equivalent (see module docstring):
-    this exists only because a cocotb coroutine cannot listen and drive the
-    same simulated wire at once."""
+    """Handle for a start_monitor() task: `captured` grows live; stop()
+    cancels the task and returns the bytes seen."""
 
     def __init__(self, task, captured):
         self._task = task
@@ -204,14 +143,8 @@ class _RxMonitor:
 
 
 async def wait_until_quiet(dut, monitor, quiet_cycles, max_checks=200):
-    """Poll monitor.captured until no new byte has arrived for
-    `quiet_cycles` clocks in a row, then stop the monitor and return
-    everything captured. `quiet_cycles` must exceed the LONGEST possible gap
-    before any response can appear at all (not just one byte period): if the
-    monitor was started before a multi-cycle stimulus/pipeline delay that
-    produces no bytes for a while, too short a window here declares "quiet"
-    before the first byte has even had a chance to arrive. Callers size this
-    per scenario; see the call sites for the actual gap being bounded."""
+    """Stop the monitor once no byte arrives for `quiet_cycles` clocks;
+    `quiet_cycles` must exceed the longest gap before the first response."""
     for _ in range(max_checks):
         before = len(monitor.captured)
         for _ in range(quiet_cycles):
@@ -275,13 +208,7 @@ async def do_read_cycles(link):
 
 
 async def do_resync(dut, link, quiet_cycles):
-    """TB-side equivalent of attn_host.SerialLink.resync(): sends the
-    IMPORTED build_resync_frame(), drains everything the DUT transmits
-    (via a background monitor -- responses can start arriving before all
-    18 ping bytes are even sent, see the module docstring's concurrency
-    note) until quiet, and checks success with the IMPORTED is_resynced()
-    pure function -- exactly the logic the shipped host uses, just over the
-    bit-banged link instead of pyserial."""
+    """attn_host.SerialLink.resync() over the bit-banged link, drained by a monitor."""
     mon = link.start_monitor()
     await link.send_bytes(attn_host.build_resync_frame())
     tail = await wait_until_quiet(dut, mon, quiet_cycles)
@@ -290,12 +217,7 @@ async def do_resync(dut, link, quiet_cycles):
 
 
 async def do_load_busy_nak(link, cmd_byte, cmd_name):
-    """Send ONLY the LOAD_Q/K/V command byte (deliberately no row byte, no
-    payload): while attn_busy is set, attn_uart_top NAKs immediately from
-    P_CMD and never transitions to P_LROW/P_LDATA (guide 6.3.4, mirrors the
-    RUN-while-busy arm), so nothing else should ever be sent as part of this
-    frame. Callers prove that by sending a real command right after and
-    checking it is not mistaken for a row/payload byte."""
+    """Send only the LOAD command byte; while busy the DUT NAKs from P_CMD."""
     await link.send_byte(cmd_byte)
     resp = await link.recv_byte()
     EXERCISED.add(cmd_name)
@@ -352,14 +274,14 @@ async def start_and_reset(dut):
     for _ in range(5):
         await RisingEdge(dut.clk)
     dut.rst_btn.value = 0
-    for _ in range(5):  # margin past sync2ff's 2-cycle rst release latency
+    for _ in range(5):  # margin past sync2ff's 2-cycle reset release
         await RisingEdge(dut.clk)
 
 
 # ---- Tests -------------------------------------------------------------------
 @cocotb.test()
 async def test_ping(dut):
-    """PING (0x50) must echo 0xA5, link test, no state change."""
+    """PING (0x50) answers 0xA5."""
     await start_and_reset(dut)
     link = UartTbLink(dut)
     resp = await do_ping(link)
@@ -368,8 +290,7 @@ async def test_ping(dut):
 
 @cocotb.test()
 async def test_nak_unknown(dut):
-    """An unknown command byte gets NAK 0x3F, and the FSM stays in P_CMD
-    (checked by a following PING succeeding normally, no desync)."""
+    """Unknown command bytes get NAK 0x3F and a following PING still works."""
     await start_and_reset(dut)
     link = UartTbLink(dut)
 
@@ -385,10 +306,7 @@ async def test_nak_unknown(dut):
 
 @cocotb.test()
 async def test_end_to_end(dut):
-    """Full LOAD_Q/K/V + SET_NLEN + RUN + poll STATUS + READ_OUT +
-    READ_CYCLES flow for n_len in {4, 16}, random data, bit-exact compare
-    against model/attn.py attn_fixed EVERY byte, plus the cycle_count
-    formula check (guide 6.3.4 "Host flow for one inference")."""
+    """Full host flow for n_len 4 and 16: outputs bit-exact vs golden, cycle count vs formula."""
     await start_and_reset(dut)
     link = UartTbLink(dut)
     rng = seeded_rng()
@@ -420,10 +338,7 @@ async def test_end_to_end(dut):
 
 @cocotb.test()
 async def test_run_while_busy_nak(dut):
-    """A second RUN sent while attention_top is still busy must NAK (0x3F)
-    and must NOT restart the pulse (guide 6.3.4). Uses n_len=64 (nblk=16,
-    6593 core clocks, ~4.1 ms sim time) so the two-command round trip has
-    enormous margin against the run finishing early."""
+    """A second RUN while busy gets NAK; n_len=64 keeps the run long enough."""
     await start_and_reset(dut)
     link = UartTbLink(dut)
     rng = seeded_rng()
@@ -440,7 +355,6 @@ async def test_run_while_busy_nak(dut):
     resp2 = await do_run(link)
     assert resp2 == attn_host.RESP_NAK, f"RUN-while-busy: expected NAK 0x3F, got {resp2:#x}"
 
-    # Drain to completion so the DUT is idle for whatever runs next.
     for _ in range(2000):
         st = await do_status(link)
         if st["done"]:
@@ -451,22 +365,8 @@ async def test_run_while_busy_nak(dut):
 
 @cocotb.test()
 async def test_load_while_busy_nak(dut):
-    """LOAD_Q/K/V sent while attention_top is busy must NAK (0x3F)
-    immediately at the command byte and consume NO row/payload bytes (guide
-    6.3.4, mirrors the RUN-while-busy arm; rtl-designer fix under review).
-    Proven three ways: (1) the response to the bare LOAD_Q command byte is
-    exactly 0x3F; (2) a PING sent immediately afterward gets a clean 0xA5,
-    which is only possible if the FSM stayed in P_CMD and did NOT swallow
-    the PING byte as a row index (had the NAK path wrongly fallen through
-    to P_LROW, the PING's 0x50 would have been consumed as a row byte
-    instead of interpreted as a command, and this PING would silently hang
-    waiting for 16 more data bytes that never come); (3) after the run
-    completes, READ_OUT matches model/attn.py attn_fixed bit-exactly,
-    proving the load attempt did not corrupt the in-flight run's inputs
-    either. Uses n_len=64 (nblk=16, 6593 core clocks, ~4.1 ms sim time),
-    the same setup as test_run_while_busy_nak, for enormous margin against
-    the run finishing before this multi-step check completes; STATUS is
-    also polled first to positively confirm busy=1 before proceeding."""
+    """LOAD_Q while busy gets NAK, consumes no row byte (next PING answers),
+    and does not corrupt the in-flight run's output."""
     await start_and_reset(dut)
     link = UartTbLink(dut)
     rng = seeded_rng()
@@ -517,54 +417,15 @@ async def test_load_while_busy_nak(dut):
 
 @cocotb.test()
 async def test_framing_error_resilience(dut):
-    """A low glitch on uart_rx behaves in one of TWO genuinely different
-    ways, both real bench symptoms, both checked here by MONITORING uart_tx
-    for the whole window rather than assuming what did or did not happen
-    (guide 6.3.3/6.3.4, review finding: the original version of this test
-    silently swallowed a spurious response inside an unmonitored dead
-    window and asserted a false claim):
-
-    1. Sub-bit-cell glitch (shorter than the start-bit vote's own sample
-       window): a FALSE START (guide 6.3.3, "a false start returns to idle
-       and emits nothing"). Genuinely nothing is ever transmitted -- proven
-       here by monitoring, not assumed.
-    2. A break that OUTLASTS one full failed-attempt window (guide 6.3.3:
-       start + 8 data cells + stop vote, FAILED_ATTEMPT_CYCLES clocks at
-       this ClksPerBit): uart_rx's own stop vote fails and correctly drops
-       the first attempt (a genuine framing error), but seeing rx still
-       low, immediately starts a SECOND attempt (guide 6.3.3: "the receiver
-       returns to idle right after the stop vote"). If the break ends
-       mid-way through that second attempt, most of its data/stop cells
-       read idle-high, which uart_rx reads as a LEGITIMATE, framing-valid
-       byte (an 11*ClksPerBit break here reliably produces one all-1s 0xFF
-       byte, confirmed by a standalone uart_rx repro). 0xFF is an unknown
-       command, so the device transmits an UNSOLICITED NAK (0x3F) the host
-       never asked for -- a real symptom: some USB-UART bridges assert a
-       BREAK on port open/close that looks exactly like this to uart_rx
-       (guide 6.3.4; fpga/host/attn_host.py's SerialLink drains the RX
-       buffer on connect for this reason).
-
-    Both scenarios end with a fresh PING succeeding: the PROTOCOL FSM
-    itself never desyncs (P_CMD always correctly interprets the next real
-    byte); only the physical layer can produce an extra, spurious response
-    that the host must be prepared to see and discard."""
+    """A sub-bit glitch on uart_rx is a silent false start; a break spanning
+    a retry yields one 0xFF byte and so one spurious NAK. PING works after both."""
     await start_and_reset(dut)
     link = UartTbLink(dut)
 
-    # Both scenarios are started via start_monitor() BEFORE any stimulus, so
-    # the background task is already listening through whatever pipeline
-    # delay follows; quiet_cycles here still has to exceed the LONGEST gap
-    # before a byte can possibly appear. Scenario 2's worst case is roughly
-    # two full failed-attempt windows (the break's own attempt plus the
-    # retry it triggers) plus one NAK byte's transmission time; size with
-    # generous margin so a byte still in the pipeline is never mistaken for
-    # silence (this exact miscalibration was the first version of this fix:
-    # too-short a window declared "quiet" before the phantom byte arrived).
+    # Worst gap: two failed-attempt windows plus one NAK byte, with margin.
     framing_quiet_cycles = 4 * FAILED_ATTEMPT_CYCLES
 
-    # Scenario 1: sub-bit-cell glitch -> false start -> total silence.
-    # Released well before the start vote's first sample (Mid-Step), so the
-    # vote reads all-1 (idle) and the receiver treats it as a false start.
+    # Scenario 1: released before the start vote's first sample (Mid-Step).
     mon = link.start_monitor()
     await link.drive_line_low(cycles=max(_MID - _STEP - 2, 1))
     tail = await wait_until_quiet(dut, mon, quiet_cycles=framing_quiet_cycles)
@@ -574,7 +435,7 @@ async def test_framing_error_resilience(dut):
     resp = await do_ping(link)
     assert resp == attn_host.RESP_PING, "PING after a silent false-start glitch must succeed"
 
-    # Scenario 2: break spanning a retry -> exactly one spurious NAK.
+    # Scenario 2: the retry ends mid-byte and reads as 0xFF, an unknown command.
     mon = link.start_monitor()
     await link.drive_line_low(cycles=11 * CLKS_PER_BIT)
     tail = await wait_until_quiet(dut, mon, quiet_cycles=framing_quiet_cycles)
@@ -592,25 +453,13 @@ async def test_framing_error_resilience(dut):
 
 @cocotb.test()
 async def test_reset_mid_operation(dut):
-    """TWO reset-recovery scenarios, each followed by a full reload + run +
-    readback to prove recovery (RAM contents carry no reset, uarch.md 8.3,
-    exactly like tb/attention_top's rst_mid_run convention). Reviewer
-    finding: the previous single-scenario version of this test claimed
-    coverage of "any in-flight UART byte" it did not actually exercise (the
-    line was idle at reset time in that scenario); this version either runs
-    what it claims or does not claim it.
-
-    1. rst_btn pressed while attention_top is mid-run (cycle-count-wise),
-       with the UART line idle -- no byte in flight.
-    2. rst_btn pressed literally WHILE a UART byte is mid-transmission on
-       the wire (partway through a LOAD_Q data byte's bit cells), proving
-       the sync2ff/uart_rx path also recovers cleanly and does not latch
-       into a stuck state."""
+    """rst_btn mid-run and mid-UART-byte; each followed by a full reload,
+    run and readback (RAMs have no reset)."""
     await start_and_reset(dut)
     link = UartTbLink(dut)
     rng = seeded_rng()
 
-    # ---- Scenario 1: mid-run reset, UART line idle -------------------------
+    # ---- Scenario 1: mid-run reset, UART line idle ----
     n = 16
     q, k, v = random_qkv(rng, n)
     await load_qkv(link, q, k, v)
@@ -620,8 +469,7 @@ async def test_reset_mid_operation(dut):
     resp = await do_run(link)
     assert resp == attn_host.CMD_RUN
 
-    # Let the run get partway through (n=16 is 881 core clocks; 200 is well
-    # inside that window). The line is idle here: no byte in flight.
+    # n=16 runs 881 clocks, so 200 lands mid-run.
     for _ in range(200):
         await RisingEdge(dut.clk)
 
@@ -653,16 +501,14 @@ async def test_reset_mid_operation(dut):
                 f"uart={got[row][col]} golden={expected[row][col]}"
             )
 
-    # ---- Scenario 2: reset literally mid-UART-byte -------------------------
+    # ---- Scenario 2: reset mid-UART-byte ----
     n3 = 8
     q3, k3, v3 = random_qkv(rng, n3)
     frame = attn_host.build_load_row(attn_host.CMD_LOAD_Q, 0, q3[0])
     first_byte = frame[0]
     bits = [0] + [(first_byte >> i) & 1 for i in range(8)] + [1]  # start,d0..d7,stop
 
-    # Drive the first 3 bit cells (start + 2 data bits) of the FIRST frame
-    # byte by hand, then assert rst_btn before that byte is anywhere near
-    # complete: a real byte is genuinely in flight on the wire at reset.
+    # Start bit + 2 data bits, then reset with the byte in flight.
     for b in bits[:3]:
         dut.uart_rx.value = b
         for _ in range(CLKS_PER_BIT):
@@ -674,7 +520,7 @@ async def test_reset_mid_operation(dut):
     dut.rst_btn.value = 0
     for _ in range(5):
         await RisingEdge(dut.clk)
-    dut.uart_rx.value = 1  # re-idle the line: the in-flight byte is abandoned
+    dut.uart_rx.value = 1  # abandon the in-flight byte
 
     resp = await do_ping(link)
     assert resp == attn_host.RESP_PING, "PING after mid-byte reset must succeed"
@@ -694,16 +540,8 @@ async def test_reset_mid_operation(dut):
 
 @cocotb.test()
 async def test_resync_after_desync(dut):
-    """Abandon a LOAD_Q frame mid-payload (cmd + row + 8 of the 16 data
-    bytes, then simply stop -- the FSM is left waiting in P_LDATA for 8 more
-    data bytes), run the IMPORTED resync() logic (build_resync_frame +
-    is_resynced, the exact functions fpga/host/attn_host.py's
-    SerialLink.resync() uses), and prove a full RELOAD + run + readback
-    still works afterward. Guide 6.3.4: the resync pings are legal ACT data
-    codes/row bytes and get consumed as payload of whatever was mid-flight,
-    so rows loaded before a desync are NOT trustworthy -- reloading
-    everything (never assuming a partial reload survived) is the point of
-    this test, not an afterthought."""
+    """Abandon a LOAD_Q frame mid-payload, resync, then a full reload, run
+    and readback must match golden (pings are eaten as payload, so reload all)."""
     await start_and_reset(dut)
     link = UartTbLink(dut)
     rng = seeded_rng()
@@ -713,11 +551,7 @@ async def test_resync_after_desync(dut):
     partial = attn_host.build_load_row(attn_host.CMD_LOAD_Q, 0, q[0])[:2 + 8]
     await link.send_bytes(partial)
 
-    # start_monitor() inside do_resync begins BEFORE the 18-ping burst is
-    # even sent, so by the time send_bytes() returns most/all responses are
-    # already captured; a modest post-send quiet window (one byte period,
-    # plus margin) is enough here, unlike the framing test's pre-stimulus
-    # gap (see that test's comment).
+    # Monitor runs during the burst, so one byte period plus margin suffices.
     ok, tail = await do_resync(dut, link, quiet_cycles=10 * CLKS_PER_BIT)
     assert ok, f"resync: expected the drained tail to end in 0xA5, got {tail!r}"
 
@@ -736,12 +570,7 @@ async def test_resync_after_desync(dut):
 
 @cocotb.test()
 async def test_set_nlen_invalid_nak(dut):
-    """SET_NLEN validation (guide 6.3.4, added 2026-09-18, review finding
-    L13): a byte that is not a multiple of 4 in [4, 64] must be NAKed and
-    must NOT change the stored value. Proven by setting a valid 8, sending
-    several invalid bytes (each NAKed), then RUN with n=8 data: the run's
-    cycle_count equals the n=8 closed form, which it could not if any
-    invalid byte had been stored (n=6 or 0x84 would give a different nblk)."""
+    """SET_NLEN outside {4,8,..,64} is NAKed and leaves the stored n_len (checked via cycle count)."""
     await start_and_reset(dut)
     link = UartTbLink(dut)
     rng = seeded_rng()
@@ -761,7 +590,6 @@ async def test_set_nlen_invalid_nak(dut):
         )
         EXERCISED.add("NAK_NLEN_INVALID")
 
-    # Boundary values that ARE legal must still echo.
     for good in (4, 64):
         resp = await do_set_nlen(link, good)
         assert resp == attn_host.CMD_SET_NLEN, f"SET_NLEN {good}: expected echo, got {resp:#x}"
@@ -793,13 +621,8 @@ async def test_set_nlen_invalid_nak(dut):
 
 @cocotb.test()
 async def test_read_while_busy_nak(dut):
-    """READ_OUT and READ_CYCLES while attention_top is busy must NAK at the
-    command byte (guide 6.3.4, added 2026-09-18, review finding L14): a
-    mid-run READ_OUT would return a mix of old and new rows and a mid-run
-    READ_CYCLES a running counter. For READ_OUT the row byte is NOT
-    consumed (FSM stays in P_CMD), proven by a PING immediately after the
-    NAK answering 0xA5 instead of being swallowed as a row index. After the
-    run completes both commands work and match golden."""
+    """READ_OUT and READ_CYCLES while busy get NAK without consuming a row
+    byte; after the run both match golden."""
     await start_and_reset(dut)
     link = UartTbLink(dut)
     rng = seeded_rng()
@@ -813,7 +636,7 @@ async def test_read_while_busy_nak(dut):
     st = await do_status(link)
     assert st["busy"], "test setup error: expected busy=1 right after RUN accepted"
 
-    # READ_OUT command byte only (deliberately no row byte).
+    # Command byte only, no row byte.
     await link.send_byte(attn_host.CMD_READ_OUT)
     resp = await link.recv_byte()
     assert resp == attn_host.RESP_NAK, f"READ_OUT-while-busy: expected NAK, got {resp:#x}"
@@ -849,9 +672,7 @@ async def test_read_while_busy_nak(dut):
 
 @cocotb.test()
 async def test_zz_coverage_closure(dut):
-    """Must be the LAST test in this file (see module docstring for the
-    declaration-order guarantee). Fails loudly if any protocol command
-    class was never exercised across the whole regression."""
+    """Must stay the last test: fails if any command class was never exercised."""
     missing = REQUIRED_COMMANDS - EXERCISED
     assert not missing, f"protocol command classes never exercised: {sorted(missing)}"
     dut._log.info(f"coverage closure: exercised {sorted(EXERCISED)}")

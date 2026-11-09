@@ -1,29 +1,9 @@
 #!/usr/bin/env python3
-"""Golden vectors for the matmul_tile UVM environment (tb/uvm), and the
-post-simulation checker for its constrained-random test.
+"""Golden vectors and trace checker for the matmul_tile UVM env (the env's only reference model).
 
-Two modes, one mirror. The mirror is the tile contract of docs/uarch.md 8.1
-applied to all 16 accumulators with 24-bit wrap, the same semantics
-tb/matmul_tile/test_matmul_tile.py's TileMirror uses and the same exact
-integer products model/attn.py's SACC loop uses. It is the ONLY reference
-the UVM environment ever compares against; there is deliberately no
-SystemVerilog model of the MAC (target-scores change 1, "do not write a
-second reference model").
-
-  --emit  seed  out.txt   Constrained-random stimulus (weighted toward the
-                          Q1.6 edges) plus the expected acc_flat after every
-                          edge. tb/uvm's replay sequence drives the stimulus
-                          columns and its scoreboard compares acc_flat with
-                          the expected columns on every cycle.
-  --check trace.txt       Check a trace the UVM monitor wrote during the
-                          SV-constrained-random test (same columns, acc
-                          columns are OBSERVED): recompute expected from the
-                          stimulus and diff. Exit 1 on any mismatch.
-
-File format, one line per clock edge, whitespace separated, '#' comments:
-  rst en clr q0 q1 q2 q3 k0 k1 k2 k3 acc(0,0) acc(0,1) ... acc(3,3)
-q/k are signed int8 codes, acc are signed 24-bit values AFTER the edge
-(row-major, element (i,j) at position 4*i+j).
+Line per clock edge: rst en clr q0..q3 k0..k3 acc00..acc33 (row-major, after the edge).
+  --emit SEED OUT   constrained-random stimulus + expected accumulators
+  --check TRACE     recompute from a monitor trace's stimulus; exit 1 on mismatch
 """
 import argparse
 import random
@@ -52,8 +32,7 @@ EDGES = [-128, -64, -1, 0, 1, 63, 127]
 
 
 def rand_act(rng):
-    # 40% exact edge values, 60% uniform: biases the corners UVM coverage
-    # wants (sign combinations, |x| = 128 products) without excluding any code.
+    # 40% edge values bias coverage corners without excluding any code
     return rng.choice(EDGES) if rng.random() < 0.4 else rng.randint(-128, 127)
 
 

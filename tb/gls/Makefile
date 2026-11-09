@@ -1,26 +1,13 @@
-# Phase 4 gate-level simulation of the online_softmax sky130 netlists.
-# Run from THIS directory: make -C tb/gls all   (or lat1 / lat2 alone)
-#
-# Flow per config: scripts/gen_gls_vectors.py emits one shared stimulus file
-# plus a spec-derived expected-port file per latency (see that script's
-# header); gls_tb.v replays them against the netlist under iverilog with the
-# sky130_fd_sc_hd FUNCTIONAL cell models and dumps a VCD (consumed again by
-# the Phase 5 switching-activity comparison). PASS = "GLS PASS ... 0 errors"
-# in the log, grepped below.
-#
-# Cell models: the PDK-distributed sky130_fd_sc_hd.v + primitives.v bundled
-# with oss-cad-suite (eqy example). Two mechanical fixes are needed for
-# iverilog and applied to a LOCAL COPY in build/gls_cells (source untouched):
-#   1. `endif SOME_GUARD   ->  `endif // SOME_GUARD   (bare trailing token
-#      after `endif is rejected by iverilog)
-#   2. UNIT_DELAY defined empty (the models leave it undefined; empty is the
-#      zero-delay functional intent)
-# Override on the command line: make CELLS_SRC=<dir with the PDK cell models>
+# Gate-level simulation of the online_softmax sky130 netlists under iverilog.
+# Usage: make -C tb/gls all (or lat1 / lat2). PASS = "GLS PASS" in the log.
+# Cell models are copied to build/gls_cells with `endif GUARD rewritten to
+# `endif // GUARD, which iverilog requires. Override CELLS_SRC=<model dir>.
 CELLS_SRC ?= $(HOME)/tools/oss-cad-suite/examples/eqy/spm
 REPO      := $(abspath ../..)
 BUILD     := $(REPO)/build
 CELLS     := $(BUILD)/gls_cells
 
+# UNIT_DELAY empty = zero-delay functional models.
 IVFLAGS := -g2005 -DFUNCTIONAL -DUNIT_DELAY=
 
 .PHONY: all lat1 lat2 vectors cells clean
@@ -29,9 +16,7 @@ all: lat1 lat2
 
 cells: $(CELLS)/sky130_fd_sc_hd.v
 
-# No file prerequisites on the PDK sources: with them, a missing CELLS_SRC
-# died in make's "No rule to make target" before any message could say
-# which variable to set (2026-09-18, review finding L12).
+# No prerequisites on CELLS_SRC files, so a bad path gets the message below.
 $(CELLS)/sky130_fd_sc_hd.v:
 	@test -f "$(CELLS_SRC)/sky130_fd_sc_hd.v" -a -f "$(CELLS_SRC)/primitives.v" || { echo "CELLS_SRC=$(CELLS_SRC): sky130_fd_sc_hd.v/primitives.v not found; set CELLS_SRC=<dir with the PDK cell models> (README, Toolchain paths)"; exit 1; }
 	mkdir -p $(CELLS)

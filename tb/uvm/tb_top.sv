@@ -1,13 +1,7 @@
 `timescale 1ns / 1ps
-// tb_top: top level of the matmul_tile UVM environment. Instantiates the
-// interface and the DUT, hands the interface to the environment through
-// uvm_config_db, and runs run_test(). The test name comes from
-// +UVM_TESTNAME (tile_replay_test or tile_random_test, tb/uvm/tile_test.sv).
-//
-// Exit status: the scoreboard raises uvm_fatal on any error; as a second
-// line, final_phase here counts UVM_ERROR/UVM_FATAL reports and calls
-// $fatal so the simulator returns nonzero even if a future edit removed the
-// scoreboard's fatal. `make -C tb/uvm bug-proof` depends on this.
+// tb_top: matmul_tile UVM top. Test from +UVM_TESTNAME (tile_replay_test or
+// tile_random_test). The final block turns any UVM_ERROR/UVM_FATAL into
+// $fatal so the simulator exits nonzero; `make -C tb/uvm bug-proof` needs it.
 module tb_top;
   import uvm_pkg::*;
   `include "uvm_macros.svh"
@@ -28,8 +22,7 @@ module tb_top;
       .acc_flat(tif.acc_flat)
   );
 
-  // UVM_NO_DPI builds (Verilator) cannot read +UVM_TESTNAME inside run_test(), so
-  // read it here; xsim and any DPI build behave identically.
+  // UVM_NO_DPI builds (Verilator) cannot read +UVM_TESTNAME in run_test().
   string tn;
   initial begin
     uvm_config_db#(virtual tile_if)::set(null, "*", "vif", tif);
@@ -40,8 +33,7 @@ module tb_top;
   final begin
     uvm_report_server srv;
     int errs;
-    // declaration and assignment are separate on purpose: an initializer here can be
-    // evaluated once at time 0 (static-variable rule) and then never sees the errors.
+    // Assigned separately: a static initializer would run at time 0.
     srv = uvm_report_server::get_server();
     errs = srv.get_severity_count(UVM_ERROR) + srv.get_severity_count(UVM_FATAL);
     if (errs != 0) $fatal(1, "tb_top: %0d UVM errors/fatals", errs);

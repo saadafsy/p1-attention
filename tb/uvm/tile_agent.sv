@@ -1,6 +1,5 @@
-// tile_agent: sequencer + driver + monitor for tile_if. The driver also
-// publishes every driven item (with its golden expectation, when it has
-// one) so the scoreboard can pair driven and observed edges in order.
+// tile_agent: sequencer + driver + monitor for tile_if; re-exports the
+// driver's driven_ap for the scoreboard.
 class tile_agent extends uvm_agent;
   `uvm_component_utils(tile_agent)
   tile_sequencer sqr;

@@ -1,18 +1,9 @@
 #!/usr/bin/env python3
-"""Snapshot the build/ reports that EVIDENCE.md rows cite into the tracked
-evidence/reports/<UTC stamp>/ directory, with a manifest of sha256 sums,
-sizes, the git commit, and the tool versions found on PATH.
+"""Copy the build/ reports EVIDENCE.md cites into tracked evidence/reports/<UTC stamp>/.
 
-Why (2026-09-18, review finding F014): every timing/area/power/GLS/audit
-row in EVIDENCE.md cites only files under build/, which is gitignored, so
-none of the quoted numbers (slack, cell counts, toggle totals, mW) could be
-inspected from a clone. Running `make evidence-snapshot` after the flow
-copies the report files here; commit the directory and cite
-`evidence/reports/<stamp>/<file>` (or the manifest's sha256) from the row.
-
+Writes MANIFEST.txt (sha256, sizes, git commit, tool versions). build/ is gitignored,
+so rows cite the snapshot. Only REPORT_GLOBS are copied (no netlists, VCDs, binaries).
 Usage: python3 scripts/evidence_snapshot.py [--build build] [--out evidence/reports]
-Only files matching REPORT_GLOBS are copied (logs and text reports, never
-netlists, VCDs, or binaries).
 """
 import argparse
 import hashlib

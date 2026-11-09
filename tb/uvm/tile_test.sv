@@ -1,17 +1,8 @@
-// Tests for the matmul_tile UVM environment.
-//
-//   tile_replay_test  (+UVM_TESTNAME=tile_replay_test +VECTOR_FILE=...)
-//     Golden path: replays a Python-generated vector file; the scoreboard
-//     compares every accumulator on every edge against the Python mirror.
-//   tile_random_test  (+UVM_TESTNAME=tile_random_test [+NUM_DOTS=n] +TRACE_FILE=...)
-//     SV constrained-random stimulus; in-sim only the control contract is
-//     checked, the arithmetic is checked post-sim by
-//     `python3 scripts/gen_tile_uvm_vectors.py --check <TRACE_FILE>`.
-//
-// Both end with a scoreboard report_phase that raises uvm_fatal on any
-// error, so the simulator exits nonzero; tb_top additionally checks the
-// UVM error count and calls $fatal. `make -C tb/uvm bug-proof` relies on
-// exactly that to prove the environment catches the injected mac_unit bug.
+// matmul_tile UVM tests:
+//   tile_replay_test  +VECTOR_FILE=...: every acc checked against golden.
+//   tile_random_test  [+NUM_DOTS=n] +TRACE_FILE=...: control checked in-sim,
+//     arithmetic by `python3 scripts/gen_tile_uvm_vectors.py --check`.
+// Any scoreboard error ends in uvm_fatal (nonzero exit).
 class tile_base_test extends uvm_test;
   `uvm_component_utils(tile_base_test)
   tile_env env;

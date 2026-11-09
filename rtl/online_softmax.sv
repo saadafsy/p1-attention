@@ -1,33 +1,15 @@
 `timescale 1ns / 1ps
-// online_softmax: per-row online softmax state (running max m, denominator
-// l). Spec: docs/uarch.md section 6 (recurrence), 3.5 (LUT index), 3.6 (DEN
-// bound), 8.2 / 8.2.1 (this module).
-//
-// Per accepted score s (in_valid), with (m, l) = (-32768, 0) on row_start:
-//   m_new = max(m, s)
-//   r     = lut[idx(m - m_new)]    rescale factor, UQ1.15
-//   w     = lut[idx(s - m_new)]    element weight, UQ1.15
-//   l    <= rshr(l * r, 15) + w    DEN UQ9.15
-//
-// Implementation: one of the two LUT arguments is always 0, because m_new is
-// either m or s. So a single subtractor d = s - m gives everything:
-//   d >= 0 (s is the new max): m_new = s, r = lut[idx(-d)], w = lut[0]
-//   d <  0 (m stays the max):  m_new = m, w = lut[idx(d)],  r = lut[0]
-// That is one ROM read per element instead of two, and the max compare is
-// the subtractor's sign bit instead of a separate comparator in series with
-// it. When r = lut[0] = 1.0 the rescale is exact (rshr(l * 2^15, 15) = l),
-// so that branch skips the multiplier: l <= l + w. Results are bit-identical
-// to the two-lookup form; the FORMAL block proves the index equivalence.
-//
-// PIPE_ROM = 0: whole update in one cycle; w, r, l, out_valid one cycle
-//   after the accepted s (m too).
-// PIPE_ROM = 1: the ROM read is registered, so w, r, l, out_valid arrive two
-//   cycles after s; m still updates after one (its compare must close every
-//   cycle for back-to-back elements). Same values, shifted one cycle.
-//
-// Formats: s, m SCORE Q5.10 signed 16b; w, r WGT UQ1.15 16b (<= 0x8000);
-// l DEN UQ9.15 24b, no saturation (bounded by 2^23 for rows <= 256, 3.6).
-// Rows may be back to back (row_start with in_valid, no dead cycle).
+// online_softmax: per-row running max m and denominator l (uarch 6, 8.2).
+// Per accepted s, with (m, l) = (-32768, 0) on row_start:
+//   m_new = max(m, s); r = lut[idx(m - m_new)]; w = lut[idx(s - m_new)]
+//   l <= rshr(l * r, 15) + w
+// One LUT argument is always 0, so one subtractor d = s - m and one ROM read
+// suffice: d >= 0 gives r = lut[idx(-d)], w = 1.0; d < 0 gives w = lut[idx(d)],
+// r = 1.0 (then l <= l + w, exact). FORMAL proves the index equivalence.
+// Latency: w, r, l, out_valid 1 + PIPE_ROM cycles after s; m always 1.
+// Formats: s, m SCORE Q5.10 s16; w, r WGT UQ1.15 (<= 0x8000); l DEN UQ9.15
+// u24, unsaturated (< 2^23 for rows <= 256, uarch 3.6). Rows may be back to
+// back.
 module online_softmax #(
     parameter bit PIPE_ROM = 1'b0
 ) (
@@ -48,12 +30,9 @@ module online_softmax #(
   localparam logic signed [15:0] MInit = 16'sh8000;  // -32768
   localparam logic [15:0] ExpOne = 16'h8000;  // lut[0] = exp(0) in UQ1.15
 
-  // Stage 1, shared by both configurations.
-  // |d| comes from two subtractors in parallel (s - m and m - s) picked by
-  // the sign, so no negation sits in series after the subtract. The LUT
-  // index min(round(min(|d|, 16384) / 16), 1023) reduces to: 1023 when
-  // |d| >= 16360 (round(16360 / 16) = 1023 and everything above clamps),
-  // else (|d| >> 4) + |d|[3] (round half up), a 13-bit increment.
+  // |d| from two parallel subtractors (no negate in series). The index
+  // min(round(min(|d|, 16384) / 16), 1023) is 1023 for |d| >= 16360, else
+  // (|d| >> 4) + |d|[3] (round half up).
   logic signed [15:0] m_base;  // m entering this step (row_start override)
   logic signed [16:0] d;  // s - m_base, in [-65535, 65535]
   logic signed [16:0] d_neg;  // m_base - s
@@ -72,12 +51,9 @@ module online_softmax #(
     idx    = (d_abs >= 17'd16360) ? 10'd1023 : 10'(d_abs[13:4] + {9'd0, d_abs[3]});
   end
 
-  // l update: l_next = s_max ? rshr(l_base * q, 15) + 1.0 : l_base + q,
-  // where q is the looked-up value. rshr(x, 15) + 2^15 is computed as
-  // (x + 2^14 + 2^30) >> 15, which is exact (adding a multiple of 2^15
-  // before the shift) and leaves one adder after the multiplier instead of
-  // two. Bits above 23 are provably zero for spec-compliant rows (l <= 2^23,
-  // uarch 3.6), so the 24-bit casts drop nothing.
+  // l_next = s_max ? rshr(l_base * q, 15) + 1.0 : l_base + q. The first form
+  // is (x + 2^14 + 2^30) >> 15, exact, one adder after the multiplier. Bits
+  // above 23 are zero for legal rows (uarch 3.6).
   function automatic logic [23:0] l_next(input logic [23:0] l_base, input logic [15:0] q,
                                          input logic sm);
     // verilator lint_off UNUSEDSIGNAL
@@ -116,10 +92,9 @@ module online_softmax #(
       end
     end
   end else begin : g_lat2
-    // Stage 1 registers the ROM output (inside u_rom) plus the element's
-    // valid, row_start and s_max; stage 2 does the l update. rs_p, not the
-    // live row_start, picks the l = 0 base, so a back-to-back new row cannot
-    // corrupt the update in flight.
+    // Stage 1 registers the ROM output and valid/row_start/s_max; stage 2
+    // updates l. rs_p (not the live row_start) picks the l = 0 base so a
+    // back-to-back new row cannot corrupt the update in flight.
     logic        v_p;
     logic        rs_p;
     logic        sm_p;
@@ -168,14 +143,13 @@ module online_softmax #(
   end
 
 `ifdef FORMAL
-  // Formal-only (never synthesized). Nothing here reasons about ROM contents
-  // or the multiplier; values are checked in cocotb against model/attn.py.
+  // No ROM-content or multiplier reasoning; values are checked in cocotb.
   logic f_past_valid;
   initial f_past_valid = 1'b0;
   always_ff @(posedge clk) f_past_valid <= 1'b1;
 
-  // Equivalence of the one-subtractor index with the two-lookup form of the
-  // spec (uarch 3.5): idx(x) for x <= 0 = min((min(-x, 16384) + 8) >> 4, 1023).
+  // Two-lookup spec index (uarch 3.5), x <= 0:
+  // idx(x) = min((min(-x, 16384) + 8) >> 4, 1023).
   function automatic logic [9:0] spec_idx(input logic signed [16:0] x);
     logic signed [16:0] xc;
     logic [10:0] p;
@@ -247,8 +221,7 @@ module online_softmax #(
             assert (m == (($past(s) >= $past(m)) ? $past(s) : $past(m)));
           end
         end
-        // Latency 2: out_valid mirrors in_valid two cycles back; l, w, r
-        // move only for an element accepted two cycles back.
+        // Latency 2: out_valid, l, w, r follow in_valid two cycles back.
         if (f_past_valid2 && !$past(rst) && !$past(rst, 2)) begin
           assert (out_valid == $past(in_valid, 2));
           if (!$past(in_valid, 2)) begin

@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
-"""Golden vectors for mac_unit (both the SystemVerilog and the VHDL port),
-and the checker for traces the replay testbench writes (tb/vhdl_mac).
+"""Golden vectors and trace checker for mac_unit (docs/uarch.md 8.1, 24-bit wrap).
 
-Mirror: the mac_unit control contract (docs/uarch.md 8.1 row table) with
-24-bit two's-complement wrap, the same semantics as tb/mac_unit's MacMirror
-and the SACC loop of model/attn.py. One line per clock edge:
-  rst en clr a b acc      (a, b signed int8; acc signed 24-bit AFTER the edge)
-
-  --emit SEED OUT     constrained-random stimulus + expected acc
-  --check TRACE       recompute expected over a trace's stimulus columns and
-                      diff against its acc column; exit 1 on mismatch
+Line per clock edge: rst en clr a b acc (acc after the edge).
+  --emit SEED OUT   constrained-random stimulus + expected acc
+  --check TRACE     recompute acc from a trace's stimulus; exit 1 on mismatch
 """
 import argparse
 import random

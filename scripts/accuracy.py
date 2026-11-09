@@ -1,16 +1,7 @@
 #!/usr/bin/env python3
-"""Accuracy and throughput of the fixed-point engine.
+"""Accuracy of the bit-exact model vs float64 (in Q1.6 LSBs) and throughput from the cycle formula.
 
-Accuracy: the bit-exact model (model/attn.py attn_fixed, which the RTL
-matches cycle for cycle in tb/attention_top) against float64 attention on
-the same dequantized inputs. Errors are in output LSBs (Q1.6, 1 LSB = 1/64).
-The unavoidable floor is 0.5 LSB: that is what rounding an exact float
-answer to Q1.6 costs.
-
-Throughput: from the cycle formula cycles = nblk*(16*nblk+156)+1, nblk = N/4
-(docs/uarch.md 8.3, checked exactly by tb/attention_top). MACs per inference
-are N^2*D for Q.K^T plus N^2*D for P.V.
-
+Cycles = nblk*(16*nblk+156)+1 with nblk = N/4 (docs/uarch.md 8.3); MACs = 2*N^2*D.
 Usage: python3 scripts/accuracy.py [--seeds 20] [--out build/accuracy.txt]
 """
 

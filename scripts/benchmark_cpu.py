@@ -1,17 +1,8 @@
 #!/usr/bin/env python3
-"""Phase 2 benchmark, CPU side: time the C++ golden model per inference.
+"""CPU baseline: median wall-clock of the C++ golden model (-O2, single thread) per N.
 
-Produces build/cpu_baseline.txt with per-N wall-clock (median of repeats) for
-the same attention computation the RTL performs. Pairs with
-tb/attention_top/cycles.txt (accelerator cycle counts from the cocotb TB) to
-form the benchmark table in docs/benchmark.md. Methodology notes:
-- attn_cpp is the bit-exact golden model compiled -O2, single-threaded; this
-  is a golden-model baseline, NOT a tuned BLAS kernel, and the table must say
-  so (honest apples-to-oranges labeling).
-- Timing excludes process startup and file I/O: attn_cpp is timed around many
-  repetitions of run() via an added --bench flag? No: to keep model/attn.cpp
-  untouched, we time full process invocations and subtract the measured
-  no-work baseline (N=1) startup cost, reporting both raw and adjusted.
+Writes build/cpu_baseline.txt. Full process runs are timed; the N=1 row is the
+startup + I/O floor for adjustment. A golden-model baseline, not a tuned BLAS kernel.
 """
 
 import pathlib

@@ -1,28 +1,14 @@
 #!/usr/bin/env python3
-"""Phase 5 switching-activity proxy: count logic transitions in the GLS VCDs.
+"""Count 0<->1 transitions per net in GLS VCDs (x/z ignored, one per changed vector bit).
 
+A relative toggle proxy for two netlists on the same stimulus, not a power measurement.
 Usage: python3 scripts/toggle_count.py build/gls_lat1.vcd [build/gls_lat2.vcd ...]
-
-For each VCD (produced by make -C tb/gls all, which replays the IDENTICAL
-stimulus into both PIPE_ROM netlist configs), counts 0<->1 transitions on
-every dumped net in the DUT scope. x/z edges are ignored (they occur only
-before reset resolves). Vector signals count one toggle per changed bit.
-
-This is a TOGGLE-COUNT PROXY, not a power measurement: it weights every net
-equally (no capacitance, no slew, no clock tree since the sandbox clock is
-ideal). It is honest for RELATIVE comparison of two netlists driven by the
-same stimulus through the same cell library, which is exactly the Phase 5
-question (naive comb-ROM vs PIPE_ROM pipelined). Absolute power stays a
-tool estimate at best until Phase 7 (OpenLane) or real hardware.
 """
 import sys
 
 
 def parse_vcd(path):
-    # No special handling is needed for the $dumpvars initial-value section:
-    # a net's FIRST value line only seeds last[code] (old is None, nothing
-    # counted), so the baseline is established for free and only genuine
-    # 0<->1 changes afterwards count as toggles.
+    # A net's first value (from $dumpvars) only seeds last[code], so it is never counted.
     ids = {}       # id code -> bit width
     last = {}      # id code -> last value string
     toggles = {}   # id code -> toggle count

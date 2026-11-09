@@ -1,20 +1,9 @@
 `timescale 1ns / 1ps
-// tile_runner: Phase 6 first-bring-up helper (docs/phase6_fpga_guide.md 6.1
-// and 6.3.5). On a go edge it plays one 16-cycle constant Q/K stream into
-// matmul_tile (rtl/matmul_tile.sv, UNMODIFIED) with clr on the first cycle
-// (the 8.1 contract: clr=1,en=1 starts a new tile, no dead cycle), then
-// parks in R_DONE with the accumulators readable in place. On the board,
-// VIO drives go/clr (levels; go is rising-edge detected here so a GUI
-// toggle runs exactly once) and ILA probes done + acc_flat.
-//
-// Stimulus (ACT Q1.6 codes, chosen hand-checkable, one row negative):
-//   Q row i, constant over d:  +1, +2, +3, -4   (q_flat = 0xFC030201)
-//   K row j at element d:      (j+1)*(d+1), d = 0..15 (case ROM below)
-//
-// Expected accumulators, from the mac semantics of docs/uarch.md 8.1/3.2
-// (acc(i,j) = exact sum of code products, SACC Q11.12, value = code/4096):
-//   acc_code(i,j) = sum_{d=0..15} q_i * (j+1)*(d+1) = q_i * (j+1) * 136
-//   (sum of 1..16 = 136). Element (i,j) sits at acc_flat[24*(4*i+j) +: 24]:
+// tile_runner: board bring-up helper (docs/phase6_fpga_guide.md 6.3.5). On a
+// go rising edge it streams 16 cycles of fixed Q/K into matmul_tile, then holds
+// in R_DONE; clr there zeroes the tile and returns to R_IDLE. VIO drives go/clr.
+// Q row i = {+1, +2, +3, -4}, K row j at d = (j+1)*(d+1), so
+// acc(i,j) = q_i * (j+1) * 136 at acc_flat[24*(4*i+j) +: 24]:
 //
 //   | Q row i (code) |   j=0    |   j=1    |   j=2    |   j=3    |
 //   |----------------|----------|----------|----------|----------|
@@ -26,17 +15,13 @@
 //   |                | 0x000198 | 0x000330 | 0x0004C8 | 0x000660 |
 //   | 3 (-4)         | -544     | -1088    | -1632    | -2176    |
 //   |                | 0xFFFDE0 | 0xFFFBC0 | 0xFFF9A0 | 0xFFF780 |
-//
-// FSM: R_IDLE (wait go edge) -> R_RUN (d = 0..15, en=1, clr at d==0) ->
-// R_DONE (done=1, acc stable; go edge reruns, clr clears via the tile's
-// own clr=1,en=0 contract and returns to R_IDLE).
 module tile_runner (
     input  logic         clk,
     input  logic         rst,      // synchronous, active-high
-    input  logic         go,       // VIO level; rising-edge detected inside
-    input  logic         clr,      // VIO level; honored in R_IDLE/R_DONE only
-    output logic         done,     // high once playback finished, acc stable
-    output logic [383:0] acc_flat  // 16 SACC Q11.12 (packing: uarch.md 8.1)
+    input  logic         go,       // level; rising-edge detected so one toggle runs once
+    input  logic         clr,      // honored in R_IDLE/R_DONE only
+    output logic         done,
+    output logic [383:0] acc_flat  // 16 SACC Q11.12
 );
 
   typedef enum logic [1:0] {
@@ -83,18 +68,14 @@ module tile_runner (
     end
   end
 
-  // Tile control (all always_comb outputs assigned on all paths).
   logic tile_en, tile_clr;
   always_comb begin
     tile_en  = (state == R_RUN);
-    // In R_RUN: fresh-tile clr at d==0. Outside R_RUN: clr=1,en=0 zeroes
-    // the accumulators (8.1 contract) when the VIO clr level is set.
+    // clr at d==0 starts a fresh tile; outside R_RUN clr with en=0 zeroes it.
     tile_clr = ((state == R_RUN) && (d == 4'd0)) || ((state != R_RUN) && clr);
   end
 
-  // Stimulus. Q lanes are constant codes {+1, +2, +3, -4} (lane i at bits
-  // [8*i +: 8], uarch.md 8.1 packing). K lane j at cycle d is (j+1)*(d+1),
-  // stored as a literal 16-entry ROM so nothing is computed in fabric.
+  // K is a literal ROM so nothing is computed in fabric.
   logic [31:0] q_flat, k_flat;
 
   assign q_flat = 32'hFC030201;

@@ -1,39 +1,10 @@
 #!/usr/bin/env python3
-"""Threshold gate for coverage, per module. Fails (exit 1) below thresholds.
+"""Per-module coverage gate over tb/<module>/ artifacts; exit 1 below thresholds.
 
---module M scopes the check to tb/M/ artifacts ONLY (the old pooled
-**/coverage.dat mode let a module hide behind a neighbor; removed 2026-07-16).
---dat selects the artifact inside tb/M/ (default coverage.dat; the PIPE_ROM=1
-run of online_softmax writes coverage_pipe_rom1.dat and is gated separately,
-2026-09-18 review finding M6). COVERAGE_STUB=1 keeps the pre-Phase-3
-tolerant-stub escape hatch (tool_smoke).
-
-Line coverage (2026-09-18 review finding F004): ONLY verilator records whose
-metadata says t=line are counted. The previous script counted every 'C'
-record, pooling t=branch points into the "line" percentage; on attention_top
-that turned a true 46/53 = 86.8% (below the 90% gate) into a reported
-144/151 = 95.4% PASS. Branch coverage is now reported separately, not gated.
-
-Documented-unreachable lines are waived through tb/M/coverage_waivers.txt,
-one per line: `<source basename>:<line> <reason>`. A waiver is applied only to
-a point that exists in the artifact and is unhit; a waiver that matches
-nothing (stale) or matches a HIT point is an error, so waivers cannot rot.
-Raw, waived, and effective figures are all printed. This mirrors the
-functional model's declared UNREACHABLE bins (test_softmax_coverage.py).
-
-Whole-file exclusions (2026-09-28): the coverage_off directive in the .vlt
-files stopped removing the exp_lut.svh case-arm points on Verilator 5.053
-(it worked on 5.051), so the gate does the exclusion itself. A file is
-excluded from the LINE count only if it is listed, with a reason, in
-tb/M/coverage_exclude.txt (or coverage_exclude_pipe_rom1.txt for the
-PIPE_ROM=1 artifact), one per line: `<source basename> <reason>`. The
-excluded point count is printed, and an entry that matches no instrumented
-point is an error (so an exclusion cannot rot). The default online_softmax
-run has no exclusion: it sweeps the whole ROM.
-
-Functional coverage: if tb/M/func_coverage.txt exists (written by the TB's
-self-asserting coverage model), its TOTAL line is parsed and gated against
---func. If it does not exist, the gate says so EXPLICITLY.
+Gates only t=line Verilator points (branch is reported). Waivers (coverage_waivers.txt,
+`<file>:<line> <reason>`) and file exclusions (coverage_exclude*.txt, `<file> <reason>`)
+must match an instrumented point, so stale entries fail. Functional coverage is gated
+from func_coverage.txt when present. COVERAGE_STUB=1 passes (tool_smoke only).
 """
 import argparse
 import os
@@ -69,8 +40,7 @@ if not dat.is_file():
 
 
 def parse_records(path):
-    """Yield (type, source_basename, line, hits) per verilator 'C' record.
-    Keys are \\x01key\\x02value pairs inside the quoted string."""
+    """Yield (type, source_basename, line, hits) per verilator 'C' record (\\x01key\\x02value pairs)."""
     for ln in path.open(encoding='utf-8', errors='replace'):
         if not ln.startswith('C '):
             continue

@@ -1,7 +1,7 @@
 # Design rules
 
 The engineering rules this repo is held to. docs/uarch.md is the spec;
-this file is how the RTL, tests and claims are kept honest.
+this file is how the RTL, tests and claims are kept accurate.
 
 ## RTL coding standard
 - Synthesizable only: every always_comb assigns all outputs on all paths

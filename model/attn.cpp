@@ -1,16 +1,7 @@
-// Bit-accurate fixed-point golden model, C++ reimplementation.
-//
-// NORMATIVE reference: docs/uarch.md. This file must be BIT-IDENTICAL to
-// model/attn.py on every input; model/crosscheck.py proves it. It consumes
-// the exp LUT emitted by attn.py (model/exp_lut.hex) so the table has exactly
-// one source in the project.
-//
-// C++ pitfall handled here: integer '/' truncates toward zero, but the spec
-// requires floor semantics on negatives. All rounding goes through floordiv().
-//
+// C++ port of the bit-accurate golden model model/attn.py (checked by model/crosscheck.py).
+// Reads the LUT from model/exp_lut.hex. C++ '/' truncates, so rounding uses floordiv().
 // Usage: attn_cpp <exp_lut.hex> <stimulus.txt> <output.txt>
-//   stimulus: "N D" then N*D ints for Q, N*D for K, N*D for V (Q1.6 raw,
-//   whitespace separated). Output: N lines of D ints (Q1.6 raw).
+//   stimulus: "N D" then N*D Q1.6 ints each for Q, K, V; output: N lines of D ints.
 
 #include <cassert>
 #include <cstdint>
@@ -21,7 +12,7 @@
 
 namespace {
 
-// ---- Normative constants (docs/uarch.md sections 1-3) ----------------------
+// ---- Constants (docs/uarch.md sections 1-3) ---------------------------------
 constexpr int kDDim = 16;
 constexpr int kDShift = 2;      // log2(sqrt(D))
 constexpr int kNMax = 256;
@@ -58,7 +49,7 @@ int lut_index(int64_t d_raw) {
   return static_cast<int>(idx < kLutSize ? idx : kLutSize - 1);
 }
 
-// ---- Model class (OOP per the build sheet; holds the LUT and config) --------
+// ---- Model class -------------------------------------------------------------
 class AttnModel {
  public:
   explicit AttnModel(std::vector<int> lut) : lut_(std::move(lut)) {
@@ -66,8 +57,7 @@ class AttnModel {
     assert(lut_[0] == kExpOne);
   }
 
-  // Streaming attention per docs/uarch.md section 6. q,k,v are N x D of
-  // Q1.6 raw ints in [-128, 127]; returns N x D of Q1.6 raw ints.
+  // Streaming attention (docs/uarch.md section 6) on N x D Q1.6 raw ints.
   std::vector<std::vector<int>> run(const std::vector<std::vector<int>>& q,
                                     const std::vector<std::vector<int>>& k,
                                     const std::vector<std::vector<int>>& v) const {

@@ -1,27 +1,8 @@
-"""attention_top testbench: end-to-end streaming attention integration
-(docs/uarch.md 8.3) checked against model/attn.py attn_fixed, the SAME
-bit-exact golden reference used by tb/online_softmax and model/crosscheck.py.
-No re-derivation of the recurrence here: attn_fixed IS the contract.
+"""attention_top cocotb testbench (docs/uarch.md 8.3), bit-exact against
+model/attn.py attn_fixed.
 
-Load port: byte-granular synchronous write into the Q/K/V RAMs (column-
-major word-packed for Q/K, row-major for V; BRAM-inferable single-port
-synchronous memories, uarch.md 8.3), addr = {row[5:0], col[3:0]}. Output
-read port: registered, rd_data valid one cycle after rd_addr is presented
-(out_mem is a row-packed synchronous memory read back byte-granular).
-
-Handshake: start is a one-cycle pulse accepted only while busy = 0. The FSM
-samples start on the clock edge and registers S_COMPUTE on that SAME edge,
-so busy already reads 1 on the first cycle after the accepted edge (checked
-in run()); done is a registered one-cycle pulse, mutually exclusive with
-busy, coincident with the FSM landing back in S_IDLE (uarch.md 8.3, "done
-implies idle" plus "busy/done never both 1"). cycle_count is checked
-bit-exactly against the closed-form formula nblk*(16*nblk+156)+1 every run,
-not just at n=64.
-
-Drive on RisingEdge, sample on FallingEdge (post-NBA, stable), same house
-style as tb/matmul_tile and tb/online_softmax. Seed plumbing: every RNG is
-built from cocotb.RANDOM_SEED via seeded_rng(), so SEED=1 vs SEED=7
-provably changes stimulus.
+Load port addr = {row[5:0], col[3:0]}; output read is registered (one cycle).
+Drives on RisingEdge, samples on FallingEdge; RNGs seed from cocotb.RANDOM_SEED.
 """
 
 import pathlib
@@ -32,30 +13,23 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import FallingEdge, RisingEdge
 
-# ---- Import the golden model + crosscheck corner-case generators directly -
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "model"))
 import attn  # noqa: E402
-import crosscheck  # noqa: E402  (for monotonic_case, uarch.md 8.3 corner)
+import crosscheck  # noqa: E402
 
 LUT = attn.gen_exp_lut()
-D = attn.D_DIM  # 16, docs/uarch.md section 1
+D = attn.D_DIM
 
 CYCLES_PATH = pathlib.Path(__file__).resolve().parent / "cycles.txt"
 FUNC_COV_PATH = pathlib.Path(__file__).resolve().parent / "func_coverage.txt"
 
 
 class TopCoverage:
-    """Functional coverage for the integration (added 2026-09-18, review
-    finding M6: attention_top had no functional coverage model). Bins are
-    OBSERVED from stimulus and outputs by the helpers below, never set by a
-    bare "this test ran" call. The report is written by the last test in
-    file order (test_zz_coverage_closure) in the TOTAL-line format
-    scripts/check_coverage.py gates with --func."""
+    """Functional coverage bins; report format is gated by scripts/check_coverage.py --func."""
 
     GROUPS = {
-        # every supported group count class: nblk = 1, 2, 3, 4, 5, 8, 9, 16
-        # (12/20/36 are the non-power-of-two counts, review finding L17)
+        # nblk = 1, 2, 3, 4, 5, 8, 9, 16 (12/20/36 cover non-power-of-two counts)
         "n_len": ["n_4", "n_8", "n_12", "n_16", "n_20", "n_32", "n_36", "n_64"],
         "control": [
             "back_to_back_runs_no_reset",
@@ -132,11 +106,10 @@ def observe_outputs(out):
 
 
 def seeded_rng():
-    """Build an RNG from cocotb's per-test seed (house style, see
-    tb/matmul_tile/test_matmul_tile.py docstring for the full rationale)."""
+    """RNG seeded from cocotb's per-test seed."""
     seed = getattr(cocotb, "RANDOM_SEED", None)
     if seed is None:
-        seed = 1  # defensive fallback only; COCOTB_RANDOM_SEED is always set
+        seed = 1
     return random.Random(seed)
 
 
@@ -153,8 +126,7 @@ def wrap8(v):
 
 
 def cycle_formula(n_len):
-    """docs/uarch.md 8.3: cycles/group = (nblk+1)*16 + 4*35 = 16*nblk+156;
-    total = nblk*(16*nblk+156)+1 (the +1 is the start-accept edge)."""
+    """nblk groups of (16*nblk+156) cycles, +1 for the start-accept edge."""
     nblk = n_len // 4
     return nblk * (16 * nblk + 156) + 1
 
@@ -174,7 +146,6 @@ def assert_matrix_equal(got, expected, msg):
             )
 
 
-# ---- DUT drive/check helpers ------------------------------------------------
 async def start_and_reset(dut):
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     dut.rst.value = 1
@@ -192,9 +163,7 @@ async def start_and_reset(dut):
 
 
 async def load_matrices(dut, q, k, v):
-    """Write Q, K, V into the shared load port, one byte per cycle (sel 0/1/2
-    cycling per (row, col) so all three land at the same address in
-    consecutive cycles). addr = {row[5:0], col[3:0]} (uarch.md 8.3)."""
+    """Write Q, K, V one byte per cycle, cycling sel 0/1/2 per (row, col)."""
     n = len(q)
     d = len(q[0])
     observe_inputs(q, k, v)
@@ -207,12 +176,11 @@ async def load_matrices(dut, q, k, v):
                 dut.wdata.value = to_u8(mat[row][col])
                 await RisingEdge(dut.clk)
     dut.we.value = 0
-    await RisingEdge(dut.clk)  # settle: we=0 in effect, no dangling write
+    await RisingEdge(dut.clk)
 
 
 async def read_one(dut, row, col):
-    """Registered read port: present rd_addr, one clock edge, then rd_data
-    is valid (uarch.md 8.3: 'valid one cycle after rd_addr')."""
+    """Read one output byte; rd_data is valid one edge after rd_addr."""
     dut.rd_addr.value = (row << 4) | col
     await RisingEdge(dut.clk)
     await FallingEdge(dut.clk)
@@ -229,13 +197,7 @@ async def read_out(dut, n, d=D):
 
 
 async def run(dut, n_len):
-    """Pulse start, then poll busy/done every cycle until done fires,
-    checking the full 8.3 handshake shape on every cycle (not just at the
-    end): busy and done are never both high; busy is high on EVERY cycle
-    from start-accept to (not including) the done cycle, with no gaps;
-    done fires exactly once, coincident with busy dropping; cycle_count is
-    checked bit-exactly against the closed-form formula at the done edge.
-    Returns the observed cycle_count."""
+    """Pulse start, check the busy/done handshake every cycle, return cycle_count."""
     expected_cycles = cycle_formula(n_len)
     COV.hit("n_len", f"n_{n_len}")
     dut.n_len.value = n_len
@@ -247,11 +209,7 @@ async def run(dut, n_len):
     while True:
         await RisingEdge(dut.clk)
         if cyc == 0:
-            # start is sampled on THIS edge (pre-edge state == S_IDLE); the
-            # FSM's state_n = S_COMPUTE is computed combinationally from
-            # that pre-edge (state, start) and registers on this SAME
-            # edge, so busy is already 1 immediately after this edge, not
-            # one cycle later. Deassert start now: it has been accepted.
+            # S_COMPUTE registers on this edge, so start is already accepted.
             dut.start.value = 0
         await FallingEdge(dut.clk)
         cyc += 1
@@ -289,14 +247,9 @@ async def run(dut, n_len):
             )
 
 
-# ---- Tests -------------------------------------------------------------------
 @cocotb.test()
 async def end_to_end_golden(dut):
-    """For n in [4, 8, 16, 32, 64]: one seeded-random case, full N x D
-    output compare (bit-exact) against model/attn.py attn_fixed AND
-    cycle_count == nblk*(16*nblk+156)+1 exactly (checked inside run()).
-    busy/done handshake shape is also checked every cycle inside run().
-    Records the n-vs-cycle_count table to cycles.txt (Phase 2 benchmark)."""
+    """One random case per n in 4..64; writes the n vs cycle_count table to cycles.txt."""
     await start_and_reset(dut)
     rng = seeded_rng()
     cycles_log = []
@@ -321,9 +274,7 @@ async def end_to_end_golden(dut):
 
 @cocotb.test()
 async def corners(dut):
-    """all-zeros; all +127; all -128; V extremes with random Q/K; the
-    monotonic score pattern from model/crosscheck.py (max-update stress
-    through the whole stack) at n=16. Bit-exact compare each."""
+    """All-zero, all-max, all-min, V extremes, and the monotonic max-update case."""
     await start_and_reset(dut)
     rng = seeded_rng()
     n = 8
@@ -364,10 +315,7 @@ async def corners(dut):
 
 @cocotb.test()
 async def multi_run_no_reset(dut):
-    """Two different cases back to back without rst between: state (RAMs,
-    online_softmax's own m/l, NUM accumulators, FSM counters) must fully
-    reinitialize from the start pulse alone, with no leftover state from
-    the prior run corrupting the second."""
+    """Two runs back to back without reset: start alone must reinitialize all state."""
     await start_and_reset(dut)
     rng = seeded_rng()
     n = 8
@@ -386,10 +334,7 @@ async def multi_run_no_reset(dut):
 
 @cocotb.test()
 async def rst_mid_run(dut):
-    """Assert rst in the middle of S_COMPUTE (300 cycles into an n=64 run,
-    well inside the 6593-cycle run), verify the FSM returns to idle (busy
-    drops, done stays low, cycle_count clears), then a full clean run
-    computes bit-exactly."""
+    """Reset 300 cycles into an n=64 run, check idle, then a clean run."""
     await start_and_reset(dut)
     rng = seeded_rng()
     n = 64
@@ -437,8 +382,7 @@ async def rst_mid_run(dut):
 
 @cocotb.test()
 async def random_regression(dut):
-    """10 additional seeded-random cases at n in {4,8,16,32,64}, bit-exact
-    compare each."""
+    """10 seeded-random cases at random n in {4,8,16,32,64}."""
     await start_and_reset(dut)
     rng = seeded_rng()
     sizes = [4, 8, 16, 32, 64]
@@ -456,11 +400,7 @@ async def random_regression(dut):
 
 @cocotb.test()
 async def write_port_readback(dut):
-    """Write known bytes to Q/K/V at scattered (shuffled) addresses, run
-    once, then read the output buffer only after the run: the same output
-    address read twice must be stable, and addresses read back in random
-    order must be position-correct vs the golden output (not sequential-
-    order-dependent)."""
+    """Shuffled-address writes; repeated and random-order output reads."""
     await start_and_reset(dut)
     rng = seeded_rng()
     n = 8
@@ -510,11 +450,7 @@ async def write_port_readback(dut):
 
 @cocotb.test()
 async def nonpow2_group_counts(dut):
-    """n_len in {12, 20, 36} (nblk = 3, 5, 9): the existing tests only ever
-    used power-of-two group counts, so the kb/rg == nblk_m1 comparisons and
-    the S_DIVIDE -> S_COMPUTE rollover for odd counts were unexercised
-    (added 2026-09-18, review finding L17). Bit-exact compare and cycle
-    formula check (inside run()) for each."""
+    """n_len 12/20/36 (nblk 3/5/9) exercise the nblk_m1 compares and odd rollover."""
     await start_and_reset(dut)
     rng = seeded_rng()
     for n in (12, 20, 36):
@@ -529,11 +465,7 @@ async def nonpow2_group_counts(dut):
 
 @cocotb.test()
 async def start_while_busy_ignored(dut):
-    """A second start pulse (with a DIFFERENT n_len on the port) while a run
-    is in flight must be ignored: the run completes with the cycle count of
-    the ORIGINAL n_len and the original outputs (uarch.md 8.3: start is
-    accepted only when busy = 0; n_len is latched only on the accepted
-    start). Added 2026-09-18, review finding L17."""
+    """A start (with a different n_len) during a run is ignored."""
     await start_and_reset(dut)
     rng = seeded_rng()
     n = 16
@@ -552,7 +484,6 @@ async def start_while_busy_ignored(dut):
     await FallingEdge(dut.clk)
     assert bool(dut.busy.value), "setup error: expected busy 50 cycles into an n=16 run"
 
-    # Spurious second start with a different n_len on the port.
     dut.n_len.value = 64
     dut.start.value = 1
     await RisingEdge(dut.clk)
@@ -580,10 +511,7 @@ async def start_while_busy_ignored(dut):
 
 @cocotb.test()
 async def sel3_write_ignored(dut):
-    """sel = 3 is the documented no-write encoding of the load port
-    (uarch.md 8.3). After loading Q/K/V, every address is written again
-    with sel = 3 and random garbage; the run must still match the golden
-    output of the ORIGINAL matrices. Added 2026-09-18, review finding L17."""
+    """Writes with sel = 3 (no-write encoding) must not change any matrix."""
     await start_and_reset(dut)
     rng = seeded_rng()
     n = 8
@@ -611,10 +539,7 @@ async def sel3_write_ignored(dut):
 
 @cocotb.test()
 async def test_zz_coverage_closure(dut):
-    """Must be the LAST test in this file (cocotb 2.x runs tests in
-    file-definition order, see tb/online_softmax/test_softmax_coverage.py).
-    Dumps the functional coverage report scripts/check_coverage.py gates and
-    fails if any reachable bin is unhit."""
+    """Last test (cocotb runs in file order): write the coverage report, fail on any miss."""
     text, pct, missed = COV.report()
     FUNC_COV_PATH.write_text(text)
     dut._log.info("\n" + text)

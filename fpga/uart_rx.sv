@@ -1,21 +1,8 @@
 `timescale 1ns / 1ps
-// uart_rx: 8N1 serial receiver (Phase 6 bring-up kit; normative physical
-// layer spec: docs/phase6_fpga_guide.md 6.3.3).
-//
-// Frame: 1 start (low), 8 data bits LSB first, 1 stop (high), no parity.
-// Pacing: a full-rate counter counts ClksPerBit = CLK_HZ / BAUD clocks
-// per bit cell (868 at 100 MHz / 115200, actual baud 115207, +0.006%).
-// Each bit value is a MAJORITY-OF-3 vote of samples taken at counts
-// Mid - Step, Mid, Mid + Step (Mid = ClksPerBit/2 = 434,
-// Step = ClksPerBit/16 = 54), so a 1-sample glitch never corrupts a bit.
-// The start bit is qualified by the same vote (false start: silently back
-// to idle). A failed stop-bit vote is a framing error: the byte is DROPPED
-// silently, no valid pulse. The receiver returns to idle just after the
-// stop vote (Mid + Step + 1), not at the end of the stop cell, so
-// back-to-back frames tolerate small baud mismatch.
-//
-// Interface: data holds the last good byte; valid is a 1-cycle pulse.
-// rx MUST already be synchronized to clk (sync2ff upstream).
+// uart_rx: 8N1 receiver (docs/phase6_fpga_guide.md 6.3.3). Each bit is a
+// majority-of-3 vote at Mid-Step, Mid, Mid+Step; a failed stop vote drops the
+// byte. Returns to idle mid-stop so back-to-back frames tolerate baud mismatch.
+// rx must already be synchronized to clk.
 module uart_rx #(
     parameter int unsigned CLK_HZ = 100_000_000,
     parameter int unsigned BAUD   = 115_200
@@ -32,8 +19,7 @@ module uart_rx #(
   localparam int unsigned Step = ClksPerBit / 16;
   localparam int unsigned CntW = $clog2(ClksPerBit);
 
-  // Elaboration-time check (spec 6.3.3): with fewer than 16 clocks per bit
-  // the vote spacing Step collapses to 0 and the three samples coincide.
+  // Below 16 clocks per bit, Step is 0 and the three samples coincide.
   if (ClksPerBit < 16) begin : g_baud_check
     $error("uart_rx: CLK_HZ/BAUD must be >= 16");
   end
@@ -51,7 +37,6 @@ module uart_rx #(
   logic [7:0] shreg;
   logic s0, s1, s2;
 
-  // Majority-of-3 vote over this bit cell's samples.
   wire maj = (s0 & s1) | (s0 & s2) | (s1 & s2);
 
   always_ff @(posedge clk) begin
@@ -68,7 +53,6 @@ module uart_rx #(
     end else begin
       valid <= 1'b0;
 
-      // Sample capture, common to all active bit cells.
       if (state != RX_IDLE) begin
         if (cnt == CntW'(Mid - Step)) s0 <= rx;
         if (cnt == CntW'(Mid)) s1 <= rx;
@@ -109,8 +93,7 @@ module uart_rx #(
         end
 
         RX_STOP: begin
-          // s2 lands at Mid+Step; decide one cycle later and return to
-          // idle early (mid-stop) for back-to-back frame tolerance.
+          // s2 lands at Mid+Step; decide one cycle later.
           if (cnt == CntW'(Mid + Step + 1)) begin
             cnt   <= '0;
             state <= RX_IDLE;
@@ -118,7 +101,6 @@ module uart_rx #(
               data  <= shreg;
               valid <= 1'b1;
             end
-            // else: framing error, byte dropped silently (spec 6.3.3)
           end else begin
             cnt <= cnt + 1'b1;
           end

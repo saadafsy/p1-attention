@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-"""Phase 0 cross-check: prove model/attn.py and model/attn.cpp bit-identical.
+"""Check model/attn.py and model/attn.cpp are bit-identical on random and corner cases.
 
-Per the build sheet, the two golden models are unit-tested against each other
-on random inputs (plus corner cases). Also measures the fixed-vs-float error
-against the docs/uarch.md section 7 gate (6 LSB) as a sanity bound.
-
-Exit 0 only if: cpp builds, every case is byte-exact between py and cpp, and
-every case meets the float-error gate.
+Also verifies the tracked exp LUT (generator output, sha256 pin, fpga/exp_lut.mem) and
+the 6 LSB float-error gate. Exit 0 only if every check passes.
 """
 
 import hashlib
@@ -36,8 +32,7 @@ def rand_case(n, seed, lo=-128, hi=127):
 
 
 def monotonic_case(n):
-    """Scores strictly increase with j: forces a running-max update (and a
-    real rescale) on every single step. Worst case for rescale rounding."""
+    """Scores increase with j, forcing a max update and rescale every step."""
     q = [[64] * D for _ in range(n)]
     k = [[max(-128, min(127, -128 + 2 * j))] * D for j in range(n)]
     rng = random.Random(99)
@@ -79,14 +74,8 @@ def write_stimulus(path, q, k, v):
 def main():
     BUILD.mkdir(parents=True, exist_ok=True)
 
-    # 1. VERIFY the tracked normative LUT (single source; cpp consumes this
-    #    file). The generator's output goes to build/ and is compared, value
-    #    for value and by sha256, against the tracked file and the pin in
-    #    docs/uarch.md 3.5. The check used to OVERWRITE model/exp_lut.hex
-    #    on every run, so the sha256 pin was never actually checked here
-    #    and a checker run mutated a tracked file (2026-09-18 review
-    #    finding M5). Regenerate deliberately with
-    #    `python3 model/attn.py --emit-lut model/exp_lut.hex`.
+    # 1. Compare the tracked LUT with the generator output (written to build/, never
+    #    over the tracked file) and the sha256 pin. Regenerate with --emit-lut.
     gen_hex = BUILD / "exp_lut.generated.hex"
     attn.emit_lut(gen_hex)
     tracked = LUT_HEX.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
@@ -101,9 +90,7 @@ def main():
               "(docs/uarch.md 3.5)")
         return 1
     print(f"exp LUT verified: {LUT_HEX} == generator output, sha256 matches pin")
-    # fpga/exp_lut.mem: the XPM MEMORY_INIT_FILE for fpga/exp_lut_1p_xilinx.sv
-    # (same one-word-per-line format); it must be the same bytes so the FPGA
-    # ROM and the models share the single table (2026-09-19).
+    # fpga/exp_lut.mem (the XPM ROM init file) must be the same bytes.
     mem = ROOT / "fpga" / "exp_lut.mem"
     if mem.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n") != tracked:
         print(f"CROSSCHECK FAIL: {mem} differs from {LUT_HEX}; copy the hex over it")

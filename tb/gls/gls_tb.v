@@ -1,21 +1,10 @@
 `timescale 1ns / 1ps
-// Gate-level-sim testbench for the online_softmax sky130 netlists (Phase 4).
-// Plain Verilog-2001, iverilog + sky130_fd_sc_hd cell models. Replays the
-// golden vectors emitted by scripts/gen_gls_vectors.py (stimulus plus
-// spec-derived expected port values, see that script's header) and dumps a
-// VCD of the DUT for the Phase 5 switching-activity comparison. The SAME
-// stimulus file drives both configs; only the expected file differs.
-//
-// Plusargs:
-//   +stim=<file>   stimulus hex (required)
-//   +exp=<file>    expected-port hex (required)
-//   +n=<cycles>    number of vector lines (required)
-//   +vcd=<file>    VCD output path (optional; no dump if absent)
-//
-// Self-checking: compares {m, l, r, w, out_valid} against the expected line
-// every cycle once reset has been observed deasserted. Prints "GLS PASS"
-// with an error count of 0 on success; the caller greps for that (iverilog
-// cannot return a nonzero exit from $finish portably).
+// Gate-level-sim testbench for the online_softmax sky130 netlists (Verilog-
+// 2001, iverilog). Replays vectors from scripts/gen_gls_vectors.py and checks
+// {m, l, r, w, out_valid} every cycle after reset deasserts. Optional VCD
+// dump for power analysis.
+// Plusargs: +stim=<file> +exp=<file> +n=<cycles> (required), +vcd=<file>.
+// The caller greps for "GLS PASS" (iverilog has no portable exit status).
 module gls_tb;
 
   localparam MAXC = 8192;
@@ -90,11 +79,9 @@ module gls_tb;
     {rst, in_valid, row_start, s} = stim[0];
 
     for (i = 0; i < ncyc; i = i + 1) begin
-      // Drive this cycle's inputs just after the previous posedge region.
+      // Drive just after the previous posedge, check just before the next.
       {rst, in_valid, row_start, s} = stim[i];
       if (!rst) seen_reset_off = 1'b1;
-      // Values visible DURING cycle i settle after the drive; check just
-      // before the next posedge.
       #4;
       if (seen_reset_off) begin
         checked = checked + 1;

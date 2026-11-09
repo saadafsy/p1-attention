@@ -1,23 +1,15 @@
 #!/usr/bin/env python3
-"""Summarize an OpenSTA report_checks log (scripts/sta.tcl output) into the
-numbers a claim needs: worst setup slack (WNS), worst hold slack, the worst
-path's startpoint/endpoint, and which block of attention_top owns the path,
-classified from the hierarchical instance names in the path.
+"""Summarize a scripts/sta.tcl log: setup WNS, hold slack, worst path and its owning block.
 
-Added 2026-09-19 (target-scores change 3, top-level STA). Exit 1 if no
-slack/startpoint/endpoint can be found, so an empty or errored report can
-never be summarized as a result.
-
-Usage: python3 scripts/sta_summary.py build/sta_attention_top.log \\
-           --period 10 --out build/sta_attention_top_summary.txt
+Exit 1 if no complete setup path is found, so an empty report is never summarized.
+Usage: python3 scripts/sta_summary.py build/sta_attention_top.log --period 10 [--out FILE] [--netlist FILE]
 """
 import argparse
 import re
 import sys
 from pathlib import Path
 
-# Hierarchy prefixes -> owning block, for attention_top's netlist. Order
-# matters: the first match wins.
+# Net-name patterns -> owning block; first match wins.
 BLOCKS = [
     (r"u_tile", "matmul_tile (Q.K^T MAC array)"),
     (r"u_sm|g_softmax", "online_softmax lane (max/LUT/rescale recurrence)"),
@@ -30,9 +22,7 @@ BLOCKS = [
 
 
 def flop_nets(netlist):
-    """Map flip-flop instance name -> its Q net name. Flattened yosys
-    netlists give cells anonymous names (_123_), but the register's net
-    keeps the RTL name, which is what identifies the block."""
+    """Map flop instance -> Q net name (flattened cells are anonymous; the Q net keeps the RTL name)."""
     nets = {}
     cell = None
     for line in Path(netlist).read_text(errors="replace").splitlines():
@@ -51,9 +41,7 @@ def flop_nets(netlist):
 
 
 def parse(text):
-    """Return list of (kind, startpoint, endpoint, slack, path_lines) for
-    each report_checks path block. kind is 'max' (setup) or 'min' (hold),
-    decided by the '---HOLD-CHECK---' marker sta.tcl prints between them."""
+    """Return complete path blocks; kind is 'max' before the ---HOLD-CHECK--- marker, else 'min'."""
     paths = []
     kind = "max"
     cur = None

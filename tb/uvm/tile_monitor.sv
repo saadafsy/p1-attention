@@ -1,9 +1,6 @@
-// tile_monitor: samples the DUT pins every clock edge and publishes one
-// observed transaction per edge: the control/operands applied at edge N
-// together with the acc_flat visible after edge N (sampled at edge N+1
-// through mon_cb, which reads #1step before the edge, i.e. the post-NBA
-// value of edge N). That is exactly the "acc after this edge" the golden
-// file records, so scoreboard and coverage both consume the same object.
+// tile_monitor: one transaction per edge: the inputs applied at edge N plus
+// the acc_flat they produced (sampled at edge N+1), matching the golden
+// file's "acc after this edge".
 class tile_monitor extends uvm_monitor;
   `uvm_component_utils(tile_monitor)
   virtual tile_if vif;
@@ -20,8 +17,7 @@ class tile_monitor extends uvm_monitor;
     super.build_phase(phase);
     if (!uvm_config_db#(virtual tile_if)::get(this, "", "vif", vif))
       `uvm_fatal("MON", "virtual interface not set (uvm_config_db 'vif')")
-    // Optional observed-trace file for the post-sim Python check
-    // (scripts/gen_tile_uvm_vectors.py --check), same columns as a vector file.
+    // Optional trace for scripts/gen_tile_uvm_vectors.py --check.
     if ($value$plusargs("TRACE_FILE=%s", trace_file)) begin
       trace_fd = $fopen(trace_file, "w");
       if (trace_fd == 0) `uvm_fatal("MON", $sformatf("cannot write %s", trace_file))
@@ -39,8 +35,7 @@ class tile_monitor extends uvm_monitor;
         if (trace_fd) $fdisplay(trace_fd, "%s", pending.trace_line());
         ap.write(pending);
       end
-      // Capture what is being applied at this edge (edge number = the
-      // count sampled before it, plus one).
+      // Capture what is applied at this edge.
       pending = tile_seq_item::type_id::create("obs");
       pending.cycle = vif.mon_cb.cycle + 1;
       pending.rst = vif.mon_cb.rst;

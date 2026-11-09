@@ -1,6 +1,5 @@
-# cocotb testbench for matmul_tile. Real verilator line coverage is enabled;
-# coverage.dat is written to this directory and picked up by
-# scripts/check_coverage.py from the repo root.
+# cocotb testbench for matmul_tile with verilator line coverage
+# (coverage.dat, read by scripts/check_coverage.py).
 SIM ?= verilator
 TOPLEVEL_LANG ?= verilog
 

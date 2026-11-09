@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
-# Merge the per-seed xsim coverage databases of a regression and write a
-# text report. Vivado's xcrg does this in recent releases; older ones can
-# only report a single database. This script probes for the capability and
-# FAILS LOUDLY if merging is unavailable, so "merged coverage" is never
-# claimed from summed percentages of separate runs.
-#
+# Merge per-seed xsim coverage databases with xcrg into a text report.
+# Fails if this xcrg cannot merge (older releases cannot).
 # Usage: merge_coverage.sh <regress_dir>    (contains seed_*/cov/)
 set -euo pipefail
 dir=${1:?regress_dir}

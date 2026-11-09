@@ -42,7 +42,7 @@ machine that made them); until the new verify-attention_top-<stamp> row
 exists, attention_top's status is "needs re-run" and every
 attention_top result below describes the last verified revision.
 
-Honest status in one sentence: the design is verified in simulation and
+Status in one sentence: the design is verified in simulation and
 formal; every module is synthesized to a latch-free netlist (yosys check, 0
 problems); the online_softmax core, the design's timing limiter, meets timing
 at 38.5 MHz naive and 76.9 MHz pipelined in OpenSTA at the sky130 tt corner
@@ -110,7 +110,7 @@ Definitions used throughout this guide:
 
 ## 2. Numeric contract summary
 
-docs/uarch.md is the normative source of truth for every format, width,
+docs/uarch.md is the source of truth for every format, width,
 rounding site, and saturation site; if code and that file disagree, the code
 is the bug (docs/uarch.md, header). This section is a summary with pointers;
 nothing here overrides it.
@@ -160,7 +160,7 @@ implemented in RTL as attention_top's 16-wide serial restoring divider bank
 
 ## 3. Golden models (Phase 0)
 
-Files: model/attn.py (normative executable spec), model/attn.cpp
+Files: model/attn.py (executable spec), model/attn.cpp
 (independent reimplementation, required bit-identical), model/crosscheck.py
 (the prover). `make model-check` exits 0: the two models are bit-identical on
 all 14 random and corner cases, the exp LUT is emitted, and the
@@ -261,7 +261,7 @@ The exp() table exists ONCE in the project. model/attn.py gen_exp_lut() is
 the only generator: lut[j] = floor(2^15 * exp(-j/2^6) + 0.5) for j = 0..1023
 (1024 entries, UQ1.15, 2 KB). It is rendered into two artifacts:
 
-1. model/exp_lut.hex, the normative interchange file consumed by attn.cpp,
+1. model/exp_lut.hex, the interchange file consumed by attn.cpp,
    pinned by checksum in docs/uarch.md 3.5:
    sha256 = 541676bde3a2a703ec0e021960eed77a1806f6182cd4a8d48803e57302e84ba5
 2. rtl/exp_lut.svh, the same table rendered as a synthesizable constant case
@@ -320,7 +320,7 @@ Control contract (one cycle, all synchronous): rst clears; clr=1 en=1 loads
 a*b (a new dot product starts with no dead cycle); clr=1 en=0 clears;
 clr=0 en=1 accumulates; clr=0 en=0 holds.
 
-### 4.2 Width derivation summary (normative: docs/uarch.md 3.2)
+### 4.2 Width derivation summary (spec: docs/uarch.md 3.2)
 
 Shown, not asserted:
 - Product: raw p = a_raw * b_raw with scale 2^(6+6) = 2^12. Worst case is
@@ -340,7 +340,7 @@ impossible by the bound above, and the golden models assert it.
 ### 4.3 Microarchitecture
 
 The whole module is one combinational next-state block and one flop block,
-pasted verbatim from rtl/mac_unit.sv:
+copied from rtl/mac_unit.sv:
 
 ```systemverilog
   logic signed [15:0] prod;
@@ -450,7 +450,7 @@ SystemVerilog multiplication equals mathematical multiplication. Numerical
 correctness against an independent reference is the simulation's job (the
 cocotb mirror and the golden-model dot products).
 
-### 4.5 Known gaps (review findings, stated honestly)
+### 4.5 Known gaps (review findings)
 
 - The mac_unit testbench RNGs WERE fixed literals (random.Random(2) and
   random.Random(3)), so the Makefile SEED variable did not change this
@@ -488,7 +488,7 @@ module matmul_tile (
 ```
 
 Packing convention (little-endian slicing, element 0 in the low bits,
-normative in docs/uarch.md 8.1): q_flat[8*i +: 8] is the ACT element of Q
+specified in docs/uarch.md 8.1): q_flat[8*i +: 8] is the ACT element of Q
 row i; k_flat[8*j +: 8] is the ACT element of K row j;
 acc_flat[24*(4*i+j) +: 24] is SACC element (row i, col j), row-major. Flat
 packed vectors are used because unpacked-array ports are handled
@@ -664,7 +664,7 @@ m     <= m_new
 
 Since Phase 4 the module carries one parameter, PIPE_ROM (docs/uarch.md
 8.2.1). PIPE_ROM = 0, the default and the configuration attention_top
-instantiates, is the normative single-cycle recurrence documented in this
+instantiates, is the single-cycle recurrence documented in this
 section; the lint/synth review confirmed the default generate branch
 byte-identical to the previously audited arithmetic
 [EVIDENCE: audit-online_softmax-pipe-lint-synth]. PIPE_ROM = 1 is the
@@ -673,7 +673,7 @@ rtl/online_softmax.sv:
 
 ```systemverilog
 module online_softmax #(
-    parameter bit PIPE_ROM = 1'b0  // 0: latency-1 (normative); 1: uarch 8.2.1
+    parameter bit PIPE_ROM = 1'b0  // 0: latency-1 (reference); 1: uarch 8.2.1
 ) (
     input  logic               clk,
     input  logic               rst,        // synchronous, active-high
@@ -696,7 +696,7 @@ issued back to back with no dead cycle (row_start with in_valid overrides
 the stale state). The full cycle diagram is in docs/uarch.md 8.2 and is
 reproduced in the RTL header comment.
 
-### 6.2 Width and rounding derivation summary (normative: docs/uarch.md 3.3 to 3.6)
+### 6.2 Width and rounding derivation summary (spec: docs/uarch.md 3.3 to 3.6)
 
 - SCORE Q5.10: |s| <= 4 * sqrt(D) = 16 for D = 16, needing 5 integer bits
   (Q5 spans [-32, 32)); 1 + 5 + 10 = 16 bits. The score conversion is ONE
@@ -734,7 +734,7 @@ reproduced in the RTL header comment.
 
 Stage-1 combinational logic (base mux, running max, diffs, index math, both
 ROM lookups) is shared by both configurations; the latency-1 l update and
-register block live in the g_lat1 generate branch. Both pasted verbatim
+register block live in the g_lat1 generate branch. Both copied
 from rtl/online_softmax.sv:
 
 ```systemverilog
@@ -755,7 +755,7 @@ from rtl/online_softmax.sv:
 
 ```systemverilog
   if (PIPE_ROM == 1'b0) begin : g_lat1
-    // Normative latency-1 configuration (uarch.md 8.2): the whole recurrence
+    // Reference latency-1 configuration (uarch.md 8.2): the whole recurrence
     // closes in the cycle that consumes s.
     logic [23:0] l_base;
     logic [39:0] lr_prod;  // l * r, 24u x 16u, never registered
@@ -796,7 +796,7 @@ from rtl/online_softmax.sv:
   end
 ```
 
-The index helper, also verbatim (note the pre-clamp value is kept visible so
+The index helper, also copied (note the pre-clamp value is kept visible so
 the formal block can assert its range):
 
 ```systemverilog
@@ -903,7 +903,7 @@ ROM equivalence is additionally checked at TB import time, before any
 simulation: exp_lut.hex vs exp_lut.svh vs gen_exp_lut() entry for entry,
 plus the sha256 pin (section 3.3).
 
-Coverage honesty note: in the original (pre-parameter) audit the sole missed
+Coverage note: in the original (pre-parameter) audit the sole missed
 line-coverage point was investigated and verified UNREACHABLE: the generated
 default arm of the exp_lut_rom case statement, which a 10-bit index that is
 fully enumerated by 1024 case arms can never select
@@ -964,7 +964,7 @@ long random rows.
   configuration does NOT meet the 10 ns target (slack -15.574 ns,
   build/sta_online_softmax.log) and the pipelined variant does not either
   (slack -2.664 ns, build/sta_online_softmax_pipe1.log); the met periods
-  are 26 ns and 13 ns respectively. Full numbers and the honest framing in
+  are 26 ns and 13 ns respectively. Full numbers and the framing in
   section 9.4 [EVIDENCE: phase4-sta].
 
 ## 7. attention_top (Phase 2 integration)
@@ -977,10 +977,10 @@ section 6 for N = n_len rows of self-attention (Q, K, V all n_len x D=16,
 n_len a multiple of 4 in [4, 64]). It owns everything the leaf modules do
 not: the Q/K/V/output memories, the sequencing FSM, the score conversion
 (rounding site 1), the NUM accumulators (rounding site 4), and the output
-divider bank (rounding site 5). Normative spec: docs/uarch.md 8.3.
+divider bank (rounding site 5). Spec: docs/uarch.md 8.3.
 `make verify MODULE=attention_top` exits 0, and both reviewers independently re-checked
 [EVIDENCE: verify-attention_top], [EVIDENCE: audit-attention_top-lint-synth],
-[EVIDENCE: audit-attention_top-formal-coverage]. Ports, pasted verbatim from
+[EVIDENCE: audit-attention_top-formal-coverage]. Ports, copied from
 rtl/attention_top.sv:
 
 ```systemverilog
@@ -1061,7 +1061,7 @@ PRE-edge value by nonblocking-assignment semantics, which at that instant
 holds only the sum through d=0..14. Rather than shift the whole round-robin
 schedule by a cycle, attention_top computes the missing d=15 outer product
 combinationally from the same cycle's own q_flat/k_flat (which carry exactly
-the d=15 operands) and adds it before registering. Pasted verbatim:
+the d=15 operands) and adds it before registering. Copied:
 
 ```systemverilog
   logic [383:0] drain_buf;
@@ -1087,7 +1087,7 @@ Score conversion (rounding site 1, docs/uarch.md 3.3) happens at drain time,
 combinationally, once per cycle, from whichever (lane, key_local) element of
 drain_buf is addressed that cycle; only one element converts per cycle
 (matching one online_softmax accept per cycle), so no 16-wide SCORE buffer
-exists. Pasted verbatim:
+exists. Copied:
 
 ```systemverilog
   wire [3:0] drain_elem_idx = {lane, key_local};
@@ -1129,7 +1129,7 @@ per-(lane, k) generate loops, elaborating 64 acc*r and 64 w*v multipliers
 although only 16 of each could ever be active; the spec, this section and
 docs/benchmark.md all described the shared bank. The RTL now implements
 the shared bank below (arithmetic per column unchanged); it has not yet
-been re-verified. Pasted verbatim from the g_pv / g_num_lane generates in
+been re-verified. Copied from the g_pv / g_num_lane generates in
 rtl/attention_top.sv:
 
 ```systemverilog
@@ -1211,7 +1211,7 @@ division divr(num, den) = floor((2*num + den) / (2*den)):
   when the 26-bit trial value is >= B, shift the quotient bit in), then a
   write cycle. Quotient and remainder are exact after iteration 33.
 - Sign correction converts the unsigned quotient to the floor of the signed
-  division, then sat8 produces the ACT output. Pasted verbatim from the
+  division, then sat8 produces the ACT output. Copied from the
   g_div generate in rtl/attention_top.sv:
 
 ```systemverilog
@@ -1284,7 +1284,7 @@ port this cycle, so the registered RAM output lands next cycle exactly the
 value a combinational read of the current (rg, kb, t) used to give. Zero
 added latency; the cycle_count formula is unchanged and was re-verified
 bit-exactly by the existing testbench after the conversion. The Q memory
-block, pasted verbatim as the canonical idiom:
+block, copied as the canonical idiom:
 
 ```systemverilog
   wire [7:0] q_raddr = {rg_n, t_n};
@@ -1410,7 +1410,7 @@ still elaborates the whole datapath. Two deliberate, documented mechanics:
   FSM in a garbage configuration no real reset produces (done=1 with
   state != S_IDLE), falsifying a STATE INVARIANT like "done implies idle"
   at step 0. Scoping the trace space to reset-reachable traces is the
-  honest bounded claim for state invariants; the pure TRANSITION properties
+  accurate bounded claim for state invariants; the pure TRANSITION properties
   in mac_unit and online_softmax do not need it because they hold from any
   starting state. The full reasoning is a comment block in the RTL FORMAL
   section (rtl/attention_top.sv).
@@ -1466,7 +1466,7 @@ view:
   idling during block 0 of each group. The run excludes the 3 * N * D =
   3072-cycle byte-serial load (docs/benchmark.md).
 
-Honest caveats, in order of importance: (1) the CPU baseline is the
+Caveats, in order of importance: (1) the CPU baseline is the
 reference model written for bit-exactness (int64 arithmetic, asserts on),
 not a tuned int8 kernel; the table demonstrates cycle economy, not victory
 over optimized CPU software. (2) Converting cycles to wall time needs a
@@ -1544,7 +1544,7 @@ The original property list asserted m monotone non-decreasing within a row.
 The formal/coverage review flagged the weakness: a bug that latched a WRONG
 value larger than $past(m) would still look monotonic. Phase 3 added a
 property that pins m to the exact recurrence, solver-cheap because it only
-compares already-registered values (no ROM, no multiplier). Pasted verbatim
+compares already-registered values (no ROM, no multiplier). Copied
 from rtl/online_softmax.sv (g_f_lat1; the same pair also lives in g_f_lat2):
 
 ```systemverilog
@@ -1578,7 +1578,7 @@ clock, zero-margin I/O); nothing is a hardware measurement
 ### 9.1 The registered-ROM variant, spec first
 
 The variant was SPECIFIED before it was coded: docs/uarch.md 8.2.1 is the
-normative definition (stage boundary, latency, alignment, back-to-back row
+definition (stage boundary, latency, alignment, back-to-back row
 semantics, formal task split), written in the same spec-first discipline as
 the rest of the design. The parameter contract:
 
@@ -1611,7 +1611,7 @@ Two non-obvious design points, both from docs/uarch.md 8.2.1:
   commit lands on the same edge.
 
 The per-element VALUES of m, l, w, r are identical in both configurations;
-only alignment shifts. The whole g_lat2 branch, pasted verbatim from
+only alignment shifts. The whole g_lat2 branch, copied from
 rtl/online_softmax.sv:
 
 ```systemverilog
@@ -1781,7 +1781,7 @@ real and lands where the spec says: the PIPE_ROM=1 worst path ends at the
 w_p pipe register and the multiply is off it
 [EVIDENCE: audit-online_softmax-pipe-lint-synth].
 
-Stated plainly, because it is the most important honesty point of Phase 4:
+Stated plainly, because it is the most important point of Phase 4:
 NEITHER configuration meets the 10 ns target period. mac_unit and
 matmul_tile meet 10 ns (+4.101 ns slack each, build/sta_mac_unit.log,
 build/sta_matmul_tile.log); the softmax recurrence is the design's Fmax
@@ -1809,7 +1809,7 @@ sky130_fd_sc_hd FUNCTIONAL cell models, 0 errors each
 What makes this GLS trustworthy:
 
 - The expected vectors are SPEC-DERIVED, not RTL-derived:
-  scripts/gen_gls_vectors.py computes them from the normative text of
+  scripts/gen_gls_vectors.py computes them from the text of
   docs/uarch.md 8.2/8.2.1 using model/attn.py's primitives (lut_index,
   rshr, gen_exp_lut), so a pass means netlist ports match the spec-derived
   golden sequence cycle by cycle, with no possibility of an RTL bug
@@ -1818,7 +1818,7 @@ What makes this GLS trustworthy:
   reset, then 546 checked cycles) drives BOTH configs; per-config expected
   files (build/gls_expected_lat1.hex, build/gls_expected_lat2.hex) encode
   the latency-1 and latency-2 alignments. Identical stimulus is also what
-  makes the Phase 5 activity comparison honest.
+  makes the Phase 5 activity comparison fair.
 - Stimulus content (from the generator's docstring): back-to-back rows
   including length-1 and length-2 rows straddling the pipe depth, in_valid
   bubbles including one immediately after row_start, the 256-element
@@ -1848,7 +1848,7 @@ sby inside `make verify`. The fix, pasted from the Makefile:
 .PHONY: lint sim coverage synth-check formal verify verify-fw synth-netlist sta model-check audit-guide
 ```
 
-Impact assessment, stated honestly: no unproven formal claim ever shipped,
+Impact assessment: no unproven formal claim ever shipped,
 because every formal PASS in EVIDENCE.md was independently established by
 reviewers invoking sby directly (each audit row's command column lists the
 sby re-run), and the standalone sby runs of Phases 3 and 4 are their own
@@ -1877,7 +1877,7 @@ construction) feed two steps:
 1. scripts/toggle_count.py counts 0-to-1/1-to-0 transitions on every dumped
    net per netlist (x/z edges ignored; vector signals count one toggle per
    changed bit). A toggle count weights every net equally (no capacitance,
-   no slew, no clock tree under an ideal clock): honest for RELATIVE
+   no slew, no clock tree under an ideal clock): valid for relative
    comparison of two netlists on the same stimulus through the same
    library, which is exactly the Phase 5 question.
 2. scripts/power_proxy.tcl runs OpenSTA report_power with the measured
@@ -1960,7 +1960,7 @@ this project, and none is claimed.
 ### 11.2 Stage-gated resume bullets
 
 Only the following bullets are currently claimable, each clause mapped to
-its evidence. The bracketed clauses are the load-bearing ones.
+its evidence. The bracketed clauses carry the claim.
 
 Bullet 1: "Built a bit-exact dual golden model (Python and C++) for a
 fixed-point streaming attention engine [and proved them byte-identical
@@ -2101,7 +2101,7 @@ PIPE_ROM plumbing (docs/uarch.md 8.2.1 and 8.3), scripts/sta_summary.py,
 repo root to docs/ on the same date; its content is unchanged.
 
 Key artifacts to inspect: EVIDENCE.md (the claim ledger), docs/uarch.md
-(the normative numeric contract, incl. 8.2.1 and 8.3), docs/benchmark.md
+(the numeric contract, incl. 8.2.1 and 8.3), docs/benchmark.md
 and docs/tradeoffs.md (the Phase 2 and Phase 5 writeups),
 docs/verification_plan.md (the Phase 5 plan document), build/synth*.log and
 build/sta_*.log (yosys and OpenSTA reports), build/gls_lat*.log and

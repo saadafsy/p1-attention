@@ -1,6 +1,4 @@
-// tile_uvm_pkg: the matmul_tile UVM environment, one package, files
-// included in dependency order (the usual UVM packaging style; each file
-// stays readable on its own).
+// tile_uvm_pkg: the matmul_tile UVM environment, files in dependency order.
 package tile_uvm_pkg;
   import uvm_pkg::*;
   `include "uvm_macros.svh"

@@ -1,18 +1,7 @@
-"""mac_unit testbench: checks the RTL against the golden-model MAC semantics
-(docs/uarch.md 3.1/3.2, the exact inner loop of model/attn.py attn_fixed).
+"""mac_unit cocotb testbench (docs/uarch.md 3.1/3.2) against a 24-bit wrapping mirror.
 
-Mirror model = the normative control contract with 24-bit two's complement
-wrap. In-spec dot products (length <= 511) never wrap (uarch.md 3.2); the
-wrap tests exist to pin the register width, not to bless overflow as a
-feature.
-
-Drive on RisingEdge, sample on FallingEdge (post-NBA, stable).
-
-Seed plumbing (2026-09-18, review finding L4/F005): the random tests used
-fixed literals random.Random(2)/(3), so the Makefile's SEED never changed
-this module's stimulus and the "two seeds" audit re-run repeated identical
-vectors. Every RNG is now built from cocotb.RANDOM_SEED via seeded_rng(),
-the house style of every later testbench."""
+In-spec dot products (length <= 511) never wrap; the wrap test pins the width.
+Drives on RisingEdge, samples on FallingEdge; RNGs seed from cocotb.RANDOM_SEED."""
 
 import random
 
@@ -26,11 +15,10 @@ ACC_MAX = (1 << (ACC_W - 1)) - 1
 
 
 def seeded_rng(salt=0):
-    """RNG from cocotb's per-test seed (see module docstring); `salt` keeps
-    two RNGs in one test from replaying each other's sequence."""
+    """RNG from cocotb's per-test seed; `salt` decorrelates RNGs in one test."""
     seed = getattr(cocotb, "RANDOM_SEED", None)
     if seed is None:
-        seed = 1  # defensive fallback only; COCOTB_RANDOM_SEED is always set
+        seed = 1
     return random.Random(seed + salt)
 
 
@@ -112,21 +100,20 @@ async def reset_and_directed(dut):
 
 @cocotb.test()
 async def dot_products_vs_golden(dut):
-    """200 random D=16 dot products, exactly the golden model's SACC loop
-    (model/attn.py attn_fixed inner loop), back to back with no dead cycle."""
+    """200 random D=16 dot products back to back with no dead cycle."""
     await start_and_reset(dut)
     rng = seeded_rng()
     for trial in range(200):
         qv = [rng.randint(-128, 127) for _ in range(16)]
         kv = [rng.randint(-128, 127) for _ in range(16)]
-        ref = sum(q * k for q, k in zip(qv, kv))  # exact, as in attn.py
-        assert -(1 << 23) <= ref < (1 << 23)      # uarch.md 3.2 bound
+        ref = sum(q * k for q, k in zip(qv, kv))
+        assert -(1 << 23) <= ref < (1 << 23)
 
         for d in range(16):
             dut.a.value = qv[d]
             dut.b.value = kv[d]
             dut.en.value = 1
-            dut.clr.value = 1 if d == 0 else 0    # back-to-back restart
+            dut.clr.value = 1 if d == 0 else 0
             await RisingEdge(dut.clk)
         dut.en.value = 0
         await FallingEdge(dut.clk)
@@ -176,8 +163,7 @@ async def extremes_and_width_edge(dut):
 
 @cocotb.test()
 async def random_control_fuzz(dut):
-    """2000 cycles of fully random data and control vs the mirror, checked
-    every cycle (catches en/clr priority and hold bugs)."""
+    """2000 cycles of random data and control vs the mirror, checked every cycle."""
     await start_and_reset(dut)
     rng = seeded_rng(1)
     mirror = MacMirror()

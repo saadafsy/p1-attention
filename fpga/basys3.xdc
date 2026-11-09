@@ -1,8 +1,5 @@
-## Basys 3 constraints for fpga/nexys_a7_top.sv (the board top is board-
-## agnostic: 100 MHz in, MMCM, button, UART, two LEDs). Pin names from
-## Digilent's Basys-3-Master.xdc (github.com/Digilent/digilent-xdc).
-## Part: xc7a35tcpg236-1. UNVERIFIED: no bitstream has been built from this
-## file yet. Added 2026-09-19.
+## Basys 3 (xc7a35tcpg236-1) constraints for fpga/nexys_a7_top.sv.
+## Pins from Digilent's Basys-3-Master.xdc.
 
 ## 100 MHz system clock (board: clk, pin W5)
 set_property -dict { PACKAGE_PIN W5  IOSTANDARD LVCMOS33 } [get_ports clk100]

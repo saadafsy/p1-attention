@@ -1,14 +1,7 @@
 `timescale 1ns / 1ps
-// uart_tx: 8N1 serial transmitter (Phase 6 bring-up kit; normative physical
-// layer spec: docs/phase6_fpga_guide.md 6.3.3).
-//
-// Frame: 1 start (low), 8 data bits LSB first, 1 stop (high). Pacing:
-// ClksPerBit = CLK_HZ / BAUD clocks per bit (868 at the defaults).
-//
-// Interface: valid/ready. ready is high when idle; a byte is accepted on
-// valid AND ready and takes 10 bit times (~86.8 us at 115200). tx is wired
-// to the low bit of the 10-bit {stop, data, start} shift register, which
-// shifts in 1s, so the line is registered, glitch-free, and idles high.
+// uart_tx: 8N1 transmitter (docs/phase6_fpga_guide.md 6.3.3), valid/ready
+// handshake. tx is the low bit of a {stop, data, start} shift register that
+// shifts in 1s, so the line is registered and idles high.
 module uart_tx #(
     parameter int unsigned CLK_HZ = 100_000_000,
     parameter int unsigned BAUD   = 115_200
@@ -24,7 +17,6 @@ module uart_tx #(
   localparam int unsigned ClksPerBit = CLK_HZ / BAUD;
   localparam int unsigned CntW = $clog2(ClksPerBit);
 
-  // Elaboration-time check, matching uart_rx (spec 6.3.3).
   if (ClksPerBit < 16) begin : g_baud_check
     $error("uart_tx: CLK_HZ/BAUD must be >= 16");
   end

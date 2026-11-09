@@ -1,4 +1,4 @@
-# cocotb testbench for tool_smoke (Phase -1 pipeline smoke test).
+# cocotb testbench for tool_smoke (toolchain smoke test).
 SIM ?= verilator
 TOPLEVEL_LANG ?= verilog
 

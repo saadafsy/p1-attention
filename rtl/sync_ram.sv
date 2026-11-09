@@ -1,13 +1,9 @@
 `timescale 1ns / 1ps
-// sync_ram: one write port with byte enables, one registered read port.
-// Written in the standard byte-write-enable inference template, so Vivado
-// and yosys map it to block RAM (RAMB18/RAMB36) on an FPGA. In an ASIC flow
-// it stands for an SRAM macro; scripts/sync_ram_sta_stub.sv replaces it for
-// top-level STA (see docs/uarch.md 8.3, make sta-top).
-//
-// Read: rdata = mem[raddr] one cycle later (old data on a same-address
-// write, like a BRAM in READ_FIRST mode). Contents are not reset (a reset
-// on RAM contents blocks BRAM inference); only the output register is.
+// sync_ram: byte-enabled write port, registered read port, in the standard
+// BRAM inference template. Stands for an SRAM macro in ASIC flows
+// (scripts/sync_ram_sta_stub.sv replaces it for top-level STA).
+// rdata = mem[raddr] one cycle later, old data on a same-address write
+// (READ_FIRST). Contents are not reset (that blocks BRAM inference).
 module sync_ram #(
     parameter int AW = 8,  // address bits
     parameter int DW = 32,  // data bits, a multiple of 8

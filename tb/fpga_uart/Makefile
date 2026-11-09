@@ -1,18 +1,5 @@
-# cocotb testbench for attn_uart_top (Phase 6 bring-up kit, outside the core
-# verify flow: this directory is never referenced by the root Makefile or
-# scripts/check_coverage.py, whose --module scoping only ever reads
-# tb/<module>/). No verilator --coverage here: the protocol coverage is the
-# set-based command-class closure check in test_fpga_uart.py.
-#
-# CLK_HZ/BAUD are overridden to the SMALLEST ratio the elaboration-time check
-# in fpga/uart_rx.sv / fpga/uart_tx.sv allows (CLK_HZ/BAUD >= 16, guide
-# 6.3.3): 1_600_000 / 100_000 = 16 exactly. At the board defaults
-# (100_000_000 / 115_200 = 868 clocks/bit) one UART byte alone is 8680 clock
-# edges; a full n_len=64 run (~6593 core clocks) plus dozens of protocol
-# bytes would make this testbench too slow to run routinely. ClksPerBit=16
-# keeps the SAME RTL (majority-of-3 vote, same margins) exercised at a
-# simulation-tractable byte rate; it is a testbench-only parameter override,
-# never touches the board defaults.
+# cocotb testbench for fpga/attn_uart_top.sv (outside the core verify flow;
+# protocol coverage is checked inside test_fpga_uart.py).
 SIM ?= verilator
 TOPLEVEL_LANG ?= verilog
 
@@ -32,9 +19,9 @@ VERILOG_SOURCES = $(PWD)/../../rtl/mac_unit.sv \
 COCOTB_TOPLEVEL = attn_uart_top
 COCOTB_TEST_MODULES = test_fpga_uart
 
-# `include "rtl/exp_lut.svh" inside online_softmax.sv is repo-root-relative
-# (docs/uarch.md 8.2); same incdir fix as tb/attention_top/Makefile.
+# Repo root, for `include "rtl/exp_lut.svh".
 EXTRA_ARGS += +incdir+$(PWD)/../..
+# 16 clocks/bit, the minimum uart_rx/tx allow; board rate (868) is too slow to simulate.
 EXTRA_ARGS += -GCLK_HZ=1600000 -GBAUD=100000
 
 SEED ?= 1

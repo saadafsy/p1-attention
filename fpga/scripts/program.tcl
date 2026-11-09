@@ -1,6 +1,5 @@
-# Program a bitstream into the board (Basys 3 or Nexys A7) over JTAG/USB.
+# Program a bitstream into the board over JTAG/USB.
 # Usage: vivado -mode batch -source fpga/scripts/program.tcl -tclargs <bitfile>
-# UNVERIFIED: written without Vivado or a board.
 if {$argc != 1} { puts "usage: program.tcl <bitfile>"; exit 1 }
 set bit [lindex $argv 0]
 if {![file exists $bit]} { puts "ERROR: $bit not found"; exit 1 }

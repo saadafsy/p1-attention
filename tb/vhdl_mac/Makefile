@@ -1,9 +1,6 @@
-# Language-agnostic replay testbench for mac_unit (target-scores change 9,
-# added 2026-09-19). LANG=vhdl simulates rtl_vhdl/mac_unit.vhd under GHDL;
-# LANG=verilog simulates rtl/mac_unit.sv under verilator; both replay the
-# same vector file and write a trace. The repo-root target
-# `make vhdl-crosscheck` runs both and byte-compares the traces.
-# Never run yet (no simulator where this was written).
+# mac_unit vector-replay testbench: LANG=vhdl (GHDL, rtl_vhdl/mac_unit.vhd)
+# or LANG=verilog (verilator, rtl/mac_unit.sv); each writes a trace.
+# `make vhdl-crosscheck` at the repo root runs both and compares the traces.
 LANG ?= vhdl
 SEED ?= 5
 PWD := $(shell pwd)

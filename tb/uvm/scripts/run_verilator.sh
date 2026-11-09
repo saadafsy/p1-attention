@@ -1,18 +1,9 @@
 #!/usr/bin/env bash
-# Compile and run the matmul_tile UVM environment under Verilator with the
-# upstream Accellera UVM 1800.2-2017-1.0 library (the bootcamp's M5 route,
-# Day 45). Same interface as run_xsim.sh so tb/uvm/Makefile can switch with
-# SIM=verilator.
-#
+# Compile and run the matmul_tile UVM environment under Verilator with
+# Accellera UVM 1800.2-2017-1.0 ($UVM_HOME). Same interface as run_xsim.sh.
 # Usage: run_verilator.sh <test> <seed> <outdir> [+plusargs...] [--define MACRO] [--no-sva]
-#   --no-sva  leave tile_assertions.sv out of the compile, so a bug can only be
-#             caught by the scoreboard (used by the second bug-proof leg)
-#
-# Needs: verilator on PATH, UVM_HOME (default $HOME/tools/uvm/1800.2-2017-1.0/src).
-# Builds are cached per (defines, sva) under build/uvm_verilator/ and rebuilt
-# when any source is newer. No coverage database: Verilator's covergroup
-# support is partial and there is no xcrg-style merge, so merged coverage is
-# NOT produced by this flow.
+#   --no-sva  omit tile_assertions.sv so only the scoreboard can catch a bug
+# Builds are cached per (defines, sva) under build/uvm_verilator/; no coverage.
 set -euo pipefail
 test_name=${1:?test}; seed=${2:?seed}; outdir=${3:?outdir}; shift 3
 root=$(cd "$(dirname "$0")/../../.." && pwd)

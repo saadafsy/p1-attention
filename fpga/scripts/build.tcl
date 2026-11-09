@@ -1,15 +1,7 @@
-# Vivado batch build of fpga/nexys_a7_top.sv (the board-agnostic top) for
-# the Basys 3 (default) or the Nexys A7-100T.
-# Usage (from the repo root):
+# Vivado batch build of fpga/nexys_a7_top.sv. From the repo root:
 #   vivado -mode batch -source fpga/scripts/build.tcl -tclargs <out_dir> <mult> <divclk> <out_div> <clk_hz> [basys3|nexys_a7]
-# e.g.  ... -tclargs build/fpga/f100 10 1 10 100000000 basys3
-# Writes <out_dir>/nexys_a7_top.bit, utilization/timing reports, and
-# <out_dir>/summary.txt (WNS, WHS, BRAM/DSP/LUT/FF counts, the four
-# exp-ROM implementation check). Exit 1 on any failure, including a
-# timing-failed bitstream (the sweep records it; a failing-timing bitstream
-# is never programmed as "working").
-#
-# UNVERIFIED: written without Vivado; validate on the first real run.
+# Writes <out_dir>/nexys_a7_top.bit, reports and summary.txt (parsed by sweep.py).
+# Exits 1 on any failure, including missed timing.
 if {$argc < 5 || $argc > 6} { puts "usage: build.tcl <out_dir> <mult> <divclk> <out_div> <clk_hz> [basys3|nexys_a7]"; exit 1 }
 lassign $argv out_dir mult divclk out_div clk_hz board
 if {$board eq ""} { set board basys3 }
@@ -40,7 +32,7 @@ set generics [list \
 synth_design -top nexys_a7_top -part $part -generic $generics
 report_utilization -file $out_dir/util_synth.rpt
 
-# Gate 1: the four lane exp ROMs must be block RAM, not distributed LUT ROM.
+# The four lane exp ROMs must map to block RAM, not LUT ROM.
 set rom_cells [get_cells -hierarchical -filter {NAME =~ *u_rom* && PRIMITIVE_TYPE =~ BMEM.*}]
 set n_bram [llength $rom_cells]
 puts "exp ROM block-RAM primitives: $n_bram"

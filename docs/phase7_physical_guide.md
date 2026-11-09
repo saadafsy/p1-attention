@@ -3,7 +3,7 @@
 STATUS: NOTHING IN THIS DOCUMENT HAS BEEN EXECUTED. Per the project rule
 (docs/design_rules.md pre-empted struggle 2), OpenLane is not even installed until
 Phases 0 to 5 are done, because its Docker stack is heavy and must not block
-core work. Two different honesty levels live in this phase:
+core work. Two different levels of evidence live in this phase:
 - GDS layout, reports, KLayout screenshot, VCD power estimate: SANDBOX
   ACHIEVABLE. Real tool outputs you can produce on this machine and claim
   with evidence rows.
@@ -135,7 +135,7 @@ klayout runs/<tag>/final/gds/matmul_tile.gds
 
 (KLayout has an Ubuntu package; a userspace AppImage also works.) Turn on a
 few metal layers, zoom to show the cell rows and routing, screenshot. That
-image plus metrics.json numbers is the honest "took a design through
+image plus metrics.json numbers is the accurate "took a design through
 RTL-to-GDS on Sky130" artifact. Evidence row:
 
 | gds-matmul_tile | RTL-to-GDS clean on sky130 (DRC 0, LVS match, WNS >= 0 at 50 MHz) | PASS | openlane run <tag>, metrics.json, KLayout screenshot docs/gds/ | 0 |
@@ -172,7 +172,7 @@ report_power
 ```
 
 3. Run it twice, naive vs pipelined variant, same stimulus, and tabulate.
-   That is the honest "switching-activity power comparison" (still a tool
+   That is the accurate "switching-activity power comparison" (still a tool
    estimate at typical corner: say so; it is not a bench measurement).
 
 ## 8. TinyTapeout: the silicon path (PENDING-HARDWARE + money)
@@ -193,7 +193,7 @@ The constraints that shape the design:
 - Area: matmul_tile's ~400 FFs plus logic will need a 1x2 or 2x2 tile;
   check the utilization report from a trial hardening before buying.
 
-Cost and timeline, honestly: on the order of $100 to $300 for tile +
+Cost and timeline: on the order of $100 to $300 for tile +
 dev board + shipping (check current pricing at tinytapeout.com), shuttles
 run a few times per year with hard submission deadlines, and fabricated
 chips arrive roughly 6 to 12 months later.
@@ -210,8 +210,8 @@ Submission mechanics:
    done.
 5. When the chip arrives: the measurement plan is a clock sweep
    (functional ceiling vs the STA prediction) and a measured-vs-simulated
-   table on the same vectors. THAT, and only that, converts
-   tinytapeout_silicon from [Blocked: needs bench] to a real
+   table on the same vectors. Only that turns the TinyTapeout chip
+   into a real
    post-silicon-validation claim, with photos and the sweep data as the
    EVIDENCE row artifacts.
 

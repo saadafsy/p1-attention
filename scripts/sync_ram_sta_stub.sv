@@ -1,14 +1,8 @@
 `timescale 1ns / 1ps
-// STA-only stand-in for rtl/sync_ram.sv (make sta-top). In an ASIC the four
-// attention_top memories would be SRAM macros, not 32k standard-cell flip
-// flops; flattening them into flops is what made the old top-level STA
-// meaningless (a control flop driving thousands of flop-RAM selects). This
-// stub keeps the macro's pin boundary: every input is captured into a flop
-// (setup is checked on all write/read address, data and enable pins) and
-// rdata comes out of a flop (the macro's registered read). What it does NOT
-// model is the macro's own clock-to-q and setup, because no sky130 SRAM
-// liberty is part of this flow; the summary labels the result accordingly.
-// The internal XOR only keeps the captured inputs alive through synthesis.
+// STA-only stand-in for rtl/sync_ram.sv (make sta-top): models an SRAM macro's pin
+// boundary (all inputs captured in flops, registered rdata) instead of 32k flop-RAM cells.
+// Macro clock-to-q and setup are not modeled (no sky130 SRAM liberty in this flow).
+// The XOR only keeps the captured inputs alive through synthesis.
 module sync_ram #(
     parameter int AW = 8,
     parameter int DW = 32,
