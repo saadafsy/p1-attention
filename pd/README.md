@@ -66,6 +66,8 @@ of 2026-11-09, 12.5 ns constraint:
 | Power (tt, default activity, 12.5 ns) | 149 mW |
 | GDS | written (`6_final.gds`) |
 
+![attention_top layout with the four SRAM macros](../docs/img/layout_attention_top_sram.png)
+
 The last row reruns OpenSTA on the final netlist and extracted parasitics
 (`6_final.odb` / `6_final.spef`) with only the clock period changed; nothing
 is re-implemented. `evidence/reports/20261109/orfs_attention_top_final_*`
