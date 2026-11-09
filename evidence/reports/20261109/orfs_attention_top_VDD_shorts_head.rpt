@@ -1,0 +1,60 @@
+violation type: Shorts
+	srcs: net:VSS net:VDD
+	bbox = (1312.0500, 160.6000) - (1313.6300, 160.6450) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD
+	bbox = (1312.0500, 149.4350) - (1313.6300, 149.7650) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD
+	bbox = (1312.0500, 138.5550) - (1313.6300, 138.6900) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD
+	bbox = (1094.9300, 1944.6350) - (1096.5100, 1944.8100) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD
+	bbox = (2370.5100, 1944.6350) - (2372.0900, 1944.8100) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD
+	bbox = (22.9000, 2143.4200) - (24.4800, 2143.5250) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD
+	bbox = (22.9000, 2143.4200) - (24.4800, 2143.5200) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD
+	bbox = (22.9250, 2143.4200) - (24.4550, 2143.5250) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD
+	bbox = (22.9000, 2132.3150) - (24.4800, 2132.6450) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD
+	bbox = (22.9000, 2132.3200) - (24.4800, 2132.6400) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD
+	bbox = (22.9250, 2132.3150) - (24.4550, 2132.6450) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD
+	bbox = (22.9000, 2121.4350) - (24.4800, 2121.5100) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD
+	bbox = (22.9000, 2121.4400) - (24.4800, 2121.5100) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD
+	bbox = (22.9250, 2121.4350) - (24.4550, 2121.5100) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD iterm:u_kmem.u_ram.g_m64.u_sram/gnd
+	bbox = (1483.8100, 2157.5150) - (1484.3000, 2157.9450) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD iterm:u_kmem.u_ram.g_m64.u_sram/gnd
+	bbox = (1483.8100, 2155.0850) - (1484.3000, 2155.5150) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD iterm:u_kmem.u_ram.g_m64.u_sram/gnd
+	bbox = (1483.8100, 2153.5650) - (1484.3000, 2153.9950) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD iterm:u_kmem.u_ram.g_m64.u_sram/gnd
+	bbox = (1483.8100, 2151.1350) - (1484.3000, 2151.5650) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD iterm:u_kmem.u_ram.g_m64.u_sram/gnd
+	bbox = (1483.8100, 2149.6150) - (1484.3000, 2150.0450) on Layer met3
+violation type: Shorts
+	srcs: net:VSS net:VDD iterm:u_kmem.u_ram.g_m64.u_sram/gnd
+	bbox = (1483.8100, 2147.1850) - (1484.3000, 2147.6150) on Layer met3
