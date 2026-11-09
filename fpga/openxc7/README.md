@@ -18,6 +18,17 @@ Nothing here has been run on a board. The bitstream is untested in hardware,
 and the timing numbers come from nextpnr's timing model, not from Vivado or a
 bench measurement.
 
+## Result (2026-11-08, seed 1)
+
+- Post-route `clk` (MMCM output, 100 MHz target): 78.22 MHz, FAIL. The
+  critical path is 12.78 ns, of which 10.36 ns is routing: out_wr_row through
+  two CARRY4 chains in attention_top. The placement estimate was 88.64 MHz.
+- Utilisation: 14,237 LUT bels, 5,002 FFs, 941 CARRY4, 84 DSP48E1 (of 90 on
+  the 35t), 6 RAMB18E1 (the four exp ROMs plus q/k memory; v/out memory went
+  to 91 RAM64M LUTRAM), 1 MMCM, 1 BUFG.
+- The bitstream is written despite the timing failure
+  (`build/openxc7/nexys_a7_top.bit`, 2.19 MB). It is not usable at 100 MHz.
+
 ## Toolchain
 
 Installed into `~/tools/openxc7` (sourced via `~/tools/openxc7/export.sh`) with
