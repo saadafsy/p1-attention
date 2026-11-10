@@ -90,3 +90,22 @@ Q and K and the four exp ROMs are block RAM, V and out are distributed
 RAM: none of the memories is built from flip-flops. Placement, routing
 and the FPGA Fmax need Vivado (fpga/scripts/build.tcl), which has not been
 run.
+
+## Against a laptop CPU
+
+One attention head, N = 64, D = 16, one CPU core (AMD Ryzen AI 9 HX 370,
+WSL, g++ -O3 -march=native, scripts/pc_bench.cpp), three runs each:
+
+| Runs on | Time per head |
+|---|---|
+| Laptop CPU, float32 attention | 81 to 88 us |
+| Laptop CPU, the bit-exact C++ golden model | 230 to 243 us |
+| This engine at the sky130 signoff clock (79.4 MHz, 6,593 cycles) | 83 us |
+| This engine at the Vivado clock on the Basys 3 (62.5 MHz) | 105 us |
+| RV32IM core in p2-riscv-soc, optimized C | about 25 ms |
+
+The engine matches one laptop core while clocked about 50 times slower,
+with 16 multipliers. Its OpenROAD power estimate is 149 mW, about 12 uJ per
+head at 79.4 MHz (tool estimate, not measured on silicon). The laptop's
+power was not measured.
+
