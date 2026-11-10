@@ -102,7 +102,7 @@ WSL, g++ -O3 -march=native, scripts/pc_bench.cpp), four runs each:
 | Laptop CPU, the bit-exact C++ golden model | 223 to 243 us |
 | This engine at the sky130 signoff clock (79.4 MHz, 6,593 cycles) | 83 us |
 | This engine at the Vivado clock on the Basys 3 (62.5 MHz) | 105 us |
-| RV32IM core in p2-riscv-soc, optimized C | about 25 ms |
+| RV32IM core in [p2-riscv-soc](https://github.com/saadafsy/p2-riscv-soc), optimized C | about 25 ms |
 
 The engine matches one laptop core while clocked about 50 times slower,
 with 16 multipliers. Its OpenROAD power estimate is 149 mW, about 12 uJ per
