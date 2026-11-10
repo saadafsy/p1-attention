@@ -64,6 +64,7 @@ if {$wns < 0 || $whs < 0} {
   puts "ERROR: timing not met at clk_hz=$clk_hz (WNS $wns WHS $whs); no bitstream written"
   exit 1
 }
+write_checkpoint -force $out_dir/routed.dcp
 write_bitstream -force $out_dir/nexys_a7_top.bit
 puts "bitstream: $out_dir/nexys_a7_top.bit"
 exit 0

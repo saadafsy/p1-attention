@@ -36,6 +36,16 @@ Every result is bit-exact against a golden model.
 Details and caveats (what the STA does and does not model, I/O cost, how
 each number is regenerated): [docs/benchmark.md](docs/benchmark.md).
 
+| Accuracy against float64 | Throughput |
+|:---:|:---:|
+| ![error histogram against float64](docs/img/accuracy_hist.png) | ![MAC per cycle against N](docs/img/throughput.png) |
+| every output within 0.72 LSB at N = 64 (the bit-exact model the RTL matches) | 19.9 MAC/cycle at N = 64 from the cycle formula |
+
+| Placed on the Basys 3 by Vivado | Drain overlaps compute |
+|:---:|:---:|
+| ![FPGA floorplan coloured by block](docs/img/fpga_floorplan_basys3.png) | ![timing diagram of the drain window](docs/img/drain_overlap.png) |
+| slices, DSPs and block RAMs coloured by the block that uses them (scripts/fpga_floorplan.tcl/.py) | block kb-1 drains while block kb computes; no dead cycle at the block edge |
+
 Not done yet: nothing has run on a physical FPGA. The Basys 3 bitstream is
 built and meets timing in Vivado, the UART host script is ready, and the
 UART top passes its cocotb tests in simulation.
@@ -62,6 +72,7 @@ make verify MODULE=attention_top
 make sta-top                           # whole-engine sky130 timing summary
 bash pd/run_orfs.sh online_softmax     # place and route (Docker, openroad/orfs)
 python3 scripts/accuracy.py            # accuracy vs float64 + throughput table
+python3 scripts/plots.py               # the accuracy and throughput charts in docs/img
 bash scripts/fpga_resources.sh         # Artix-7 resource count
 ```
 

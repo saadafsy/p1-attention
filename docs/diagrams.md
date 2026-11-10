@@ -53,6 +53,8 @@ finished block is read out in place (into drain_buf) on the last edge.
 
 ## 3. Timing: drain overlaps compute, and the d=15 fold-in
 
+![drain overlaps compute](img/drain_overlap.png)
+
 Window: cycles t=13, 14, 15 of block kb (kb >= 1, so block kb-1 is being
 drained) and t=0, 1 of block kb+1. Values are as VISIBLE DURING the cycle
 (after the edge that started it). Source: docs/wavedrom/drain_overlap.json.
