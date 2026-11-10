@@ -30,7 +30,7 @@ Every result is bit-exact against a golden model.
 | SRAM macros | macro-backed memory proven equivalent to the flop RAM in simulation (unit compare and the full engine suite, 11/11) |
 | FPGA (Artix-7, Basys 3) | Vivado 2026.1: timing met at 62.5 MHz (+1.27 ns, about 68 MHz), 0 DRC, bitstream written; 10.2k LUTs (49%), 5.1k FFs, 52 DSP48, 7 BRAM tiles. Misses at 80 MHz (-1.13 ns) and 100 MHz (-3.18 ns). Open-source openXC7 route of earlier RTL: 78.2 MHz ([fpga/openxc7/README.md](fpga/openxc7/README.md)) |
 | Speedup in a SoC | 21.8x faster end to end than optimized C on an RV32IM core at N = 64 (10.4x at N = 16), same outputs, in simulation of the RISC-V SoC that hosts this engine; 87% of the accelerator time is moving data over AXI4-Lite |
-| Against a laptop CPU | one head (N = 64) in 83 us at the 79.4 MHz sky130 clock, the same time as float32 code on one Ryzen AI 9 core (81 to 88 us), at about 1/50 of the clock ([docs/benchmark.md](docs/benchmark.md)) |
+| Against a laptop CPU | one head (N = 64) in 83 us at the 79.4 MHz sky130 clock, the same time as float32 code on one Ryzen AI 9 core (76 to 88 us), at about 1/50 of the clock ([docs/benchmark.md](docs/benchmark.md)) |
 | Verification | cocotb vs the golden model for every module, line + functional coverage gates, SymbiYosys proofs, gate-level simulation of the sky130 netlists, a UVM environment for the tile |
 
 Details and caveats (what the STA does and does not model, I/O cost, how
