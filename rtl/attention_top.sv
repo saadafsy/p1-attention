@@ -225,6 +225,10 @@ module attention_top #(
 
   // Output RAM: the byte is selected after the read with the registered
   // column, so rd_data is valid one cycle after rd_addr.
+  // Output write port: driven by the divide stage further down.
+  logic [5:0]   out_wr_row;
+  logic         out_we;
+  logic [7:0]   out_wr_data [16];
   logic [127:0] out_word_pack;
   for (genvar gp = 0; gp < 16; gp++) begin : g_out_pack
     assign out_word_pack[8*gp+:8] = out_wr_data[gp];
@@ -471,9 +475,7 @@ module attention_top #(
     else if (state == S_DIVIDE && div_cnt == 6'd34 && row != 2'd3) row_n = row + 2'd1;
   end
 
-  wire [5:0] out_wr_row = {rg, row};
-  logic        out_we;
-  logic [7:0]  out_wr_data [16];
+  assign out_wr_row = {rg, row};
   assign out_we = (state == S_DIVIDE) && (div_cnt == 6'd34);
 
   for (genvar gD = 0; gD < 16; gD++) begin : g_div

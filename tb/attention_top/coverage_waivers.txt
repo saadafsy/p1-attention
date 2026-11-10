@@ -4,9 +4,9 @@
 # regenerate coverage.dat (make sim MODULE=attention_top) before gating.
 # A waiver must name an instrumented, UNHIT line or the gate fails.
 attention_top.sv:108 default arm of the unique-case prefetch block: state_e has exactly 4 encodings, all enumerated
-attention_top.sv:309 score saturation high side: unreachable at D=16, |s_shift| <= 2^14 (uarch.md 3.3)
-attention_top.sv:310 score saturation low side: same D=16 bound, defensive only (uarch.md 3.3)
-attention_top.sv:549 output saturation high side: |q| <= 128 by uarch.md 3.8, defensive only
-attention_top.sv:550 output saturation low side: same bound, defensive only (uarch.md 3.8)
-attention_top.sv:600 default arm of the unique-case state_n block: all 4 states enumerated
-attention_top.sv:645 default arm of the unique-case sequential FSM block: all 4 states enumerated
+attention_top.sv:313 score saturation high side: unreachable at D=16, |s_shift| <= 2^14 (uarch.md 3.3)
+attention_top.sv:314 score saturation low side: same D=16 bound, defensive only (uarch.md 3.3)
+attention_top.sv:551 output saturation high side: |q| <= 128 by uarch.md 3.8, defensive only
+attention_top.sv:552 output saturation low side: same bound, defensive only (uarch.md 3.8)
+attention_top.sv:602 default arm of the unique-case state_n block: all 4 states enumerated
+attention_top.sv:647 default arm of the unique-case sequential FSM block: all 4 states enumerated
