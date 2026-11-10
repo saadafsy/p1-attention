@@ -28,14 +28,15 @@ Every result is bit-exact against a golden model.
 | Timing, sky130 (pre-layout STA, 10 ns target) | whole engine about 94 MHz (-0.62 ns); online_softmax 100 MHz (+0.51 ns); MAC tile +3.4 ns |
 | Place and route, sky130 (OpenROAD) | online_softmax 117.9 MHz and matmul_tile 142.2 MHz signoff (10 ns), 0 DRC, 0 antenna, 0 slew/cap; whole engine with 4 OpenRAM SRAM macros (143k cells, 2.5 x 2.3 mm) closes at 12.6 ns (79.4 MHz) with 0 DRC and a clean power grid, limited by the macros' half-cycle read, see [pd/README.md](pd/README.md) |
 | SRAM macros | macro-backed memory proven equivalent to the flop RAM in simulation (unit compare and the full engine suite, 11/11) |
-| FPGA (Artix-7, Basys 3) | Synthesis: 84 DSP48, 6 RAMB18, about 8.7k LUTs. Open-source place and route (openXC7) of the RTL before the drain-control prefetch: 78.2 MHz post-route, bitstream written; the current RTL is not yet routed ([fpga/openxc7/README.md](fpga/openxc7/README.md)) |
+| FPGA (Artix-7, Basys 3) | Vivado 2026.1: timing met at 62.5 MHz (+1.27 ns, about 68 MHz), 0 DRC, bitstream written; 10.2k LUTs (49%), 5.1k FFs, 52 DSP48, 7 BRAM tiles. Misses at 80 MHz (-1.13 ns) and 100 MHz (-3.18 ns). Open-source openXC7 route of earlier RTL: 78.2 MHz ([fpga/openxc7/README.md](fpga/openxc7/README.md)) |
+| Speedup in a SoC | 21.8x faster end to end than optimized C on an RV32IM core at N = 64 (10.4x at N = 16), same outputs, in simulation of the RISC-V SoC that hosts this engine; 87% of the accelerator time is moving data over AXI4-Lite |
 | Verification | cocotb vs the golden model for every module, line + functional coverage gates, SymbiYosys proofs, gate-level simulation of the sky130 netlists, a UVM environment for the tile |
 
 Details and caveats (what the STA does and does not model, I/O cost, how
 each number is regenerated): [docs/benchmark.md](docs/benchmark.md).
 
-Not done yet: nothing has run on a physical FPGA. The Vivado build for the
-Basys 3 (fpga/scripts/build.tcl) and the UART host script are ready, and the
+Not done yet: nothing has run on a physical FPGA. The Basys 3 bitstream is
+built and meets timing in Vivado, the UART host script is ready, and the
 UART top passes its cocotb tests in simulation.
 
 ## Design points worth reading

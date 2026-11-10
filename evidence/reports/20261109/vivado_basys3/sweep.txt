@@ -1,0 +1,4 @@
+Vivado 2026.1, Basys 3 (xc7a35tcpg236-1), fpga/scripts/build.tcl
+100 MHz: ERROR: timing not met at clk_hz=100000000 (WNS -3.177 WHS 0.054); no bitstream written
+80 MHz: ERROR: timing not met at clk_hz=80000000 (WNS -1.128 WHS 0.066); no bitstream written
+62.5 MHz: setup WNS +1.266 ns, hold WHS +0.088 ns, bitstream written
